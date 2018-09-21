@@ -8,16 +8,11 @@ import java.util.concurrent.*;
 import java.net.*;
 import java.lang.*;
 
-import picocli.CommandLine;
-import picocli.CommandLine.Option;
-import picocli.CommandLine.Parameters;
-
 public class Server {
     
     private int port;
 
     Server(int port) {
-        System.out.printf("run server w/ port %d\n", port);
         this.port = port;
     }
 
@@ -44,19 +39,19 @@ public class Server {
                 totalBytes += numBytes;
                 totalTime = System.currentTimeMillis();
             }
+
         } catch(IOException e) {
-            System.out.printf("IOException occured during server receive\n");
+            System.out.printf("Error: IOException occured during server receive%n");
         } finally{
             if (socket != null) {
                 try{
                     socket.close();
                 }catch(IOException e){
-                    System.out.printf("Error closing server socket\n");
+                    System.out.printf("Error: Failed closing server socket%n");
                 }
             }    
         }
 
-        System.out.printf("received=%d KB rate=%f Mbps", totalBytes / 1000, ((double)totalBytes /(1000.0^2)) / ((double)totalTime/1000.0));
-        //System.out.printf("connection to client ended w/ %d bytes recieved\n", totalBytes);
+        System.out.printf("received=%d KB rate=%f Mbps%n", totalBytes / 1000, (totalBytes / Math.pow(1000,2)) / (totalTime/1000));
     }
 }
