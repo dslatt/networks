@@ -46,7 +46,7 @@ public class Client {
 
             while (System.currentTimeMillis() < endTime) {
                 out.write(data);
-                dataSent += dataSent + data.length;
+                dataSent += dataSent + 1000;
             }
         } catch(IOException e) {
             System.out.printf("IOException occured during client transmit\n");
