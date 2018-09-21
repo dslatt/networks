@@ -10,6 +10,11 @@ import java.lang.*;
 
 public class Client {
 
+    // timeout value on socket connection in millis
+    private static final int CLIENT_TIMEOUT = 10000;
+
+    public volatile boolean killFlag = true;
+
     private int port;
     private String host;
     private int time;
@@ -33,16 +38,28 @@ public class Client {
 
 	DataOutputStream out = null;
 
+        Timer cutoffTimer = new Timer();
+
         try {
             // create socket connection to server
-            client = new Socket(host, port);
+            client = new Socket();
+
+            client.connect(new InetSocketAddress(host,port), CLIENT_TIMEOUT);
+
+            cutoffTimer.schedule(new TimerTask() {
+                   @Override
+                   public void run() {
+                       killFlag = false; 
+                   }
+            }, time * 1000);
 
             out = new DataOutputStream(client.getOutputStream());
 
-            startTime = System.currentTimeMillis();
-            endTime = startTime + TimeUnit.SECONDS.toMillis(time);
+            //startTime = System.currentTimeMillis();
+            //endTime = startTime + TimeUnit.SECONDS.toMillis(time);
 
-            while (System.currentTimeMillis() < endTime) {
+            //while (System.currentTimeMillis() < endTime) {
+            while (killFlag) {
                 out.write(data, 0, data.length);
             }
 
