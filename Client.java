@@ -39,14 +39,13 @@ public class Client {
             // create socket connection to server
             client = new Socket(host, port);
 
-            OutputStream out = client.getOutputStream();
+            DataOutputStream out = new DataOutputStream(client.getOutputStream());
 
             startTime = System.currentTimeMillis();
             endTime = startTime + 1000*time;
 
             while (System.currentTimeMillis() < endTime) {
-                out.write(data);
-                dataSent += dataSent + 1000;
+                out.write(data, 0, 1000);
             }
         } catch(IOException e) {
             System.out.printf("IOException occured during client transmit\n");
@@ -58,6 +57,7 @@ public class Client {
                     System.out.printf("Error closing client socket\n");
                 }
             }
+            dataSent = out.size();
             System.out.println("datasent == "  + dataSent);
         }
 
