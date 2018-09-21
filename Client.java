@@ -58,6 +58,7 @@ public class Client {
                     System.out.printf("Error closing client socket\n");
                 }
             }
+            System.out.println("datasent == "  + dataSent);
         }
 
         System.out.printf("client ended after %d seconds while sending %d bytes\n", (System.currentTimeMillis() - startTime)/1000, dataSent);
