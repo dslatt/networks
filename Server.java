@@ -56,7 +56,7 @@ public class Server {
             }    
         }
 
-        System.out.printf("received=%d KB rate=%f Mbps", totalBytes / 1000, ((double)totalBytes /(1000^2)) / (totalTime/1000));
+        System.out.printf("received=%d KB rate=%f Mbps", totalBytes / 1000, ((double)totalBytes /(1000^2)) / ((double)totalTime/1000));
         //System.out.printf("connection to client ended w/ %d bytes recieved\n", totalBytes);
     }
 }
