@@ -4,6 +4,7 @@
 
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.*;
 import java.net.*;
 import java.lang.*;
 
@@ -22,7 +23,7 @@ public class Server {
 
     public void start() {
 
-        byte[] data = new byte[1000]; 
+        byte[] data = new byte[Iperfer.BLOCK_SIZE]; 
 
         int totalBytes = 0;
         int numBytes = 0;
@@ -38,7 +39,7 @@ public class Server {
 
             InputStream in = client.getInputStream();
 
-            while((numBytes = in.read(data, 0, 1000)) != -1) {
+            while((numBytes = in.read(data, 0, data.length)) != -1) {
                 totalBytes += numBytes;
             }
         } catch(IOException e) {

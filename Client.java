@@ -4,6 +4,7 @@
 
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.*;
 import java.net.*;
 import java.lang.*;
 
@@ -26,7 +27,7 @@ public class Client {
 
     public void start() {
         
-        byte[] data = new byte[1000];
+        byte[] data = new byte[Iperfer.BLOCK_SIZE];
 
         int dataSent = 0;
 
@@ -44,10 +45,10 @@ public class Client {
             out = new DataOutputStream(client.getOutputStream());
 
             startTime = System.currentTimeMillis();
-            endTime = startTime + 1000*time;
+            endTime = startTime + TimeUnit.SECONDS.toMillis(time);
 
             while (System.currentTimeMillis() < endTime) {
-                out.write(data, 0, 1000);
+                out.write(data, 0, data.length);
             }
         } catch(IOException e) {
             System.out.printf("IOException occured during client transmit\n");
@@ -63,7 +64,7 @@ public class Client {
             System.out.println("datasent == "  + dataSent);
         }
 
-        System.out.printf("client ended after %d seconds while sending %d bytes\n", (System.currentTimeMillis() - startTime)/1000, dataSent);
+        System.out.printf("client ended after %d seconds while sending %d bytes\n", TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis() - startTime), dataSent);
 
     }
 

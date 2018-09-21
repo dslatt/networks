@@ -4,6 +4,7 @@
 
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.*;
 import java.lang.*;
 
 import picocli.CommandLine;
@@ -11,6 +12,9 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
 public class Iperfer implements Runnable {
+
+    /* constant values */
+    public static final int BLOCK_SIZE = 1000;
 
     @Option(names="-c", description="run Iperfer in client mode")
     private boolean clientMode = false;
