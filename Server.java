@@ -27,6 +27,7 @@ public class Server {
 
         int totalBytes = 0;
         int numBytes = 0;
+        long totalTime = 0;
 
         ServerSocket socket = null;
 
@@ -41,6 +42,7 @@ public class Server {
 
             while((numBytes = in.read(data, 0, data.length)) != -1) {
                 totalBytes += numBytes;
+                totalTime = System.currentTimeMillis();
             }
         } catch(IOException e) {
             System.out.printf("IOException occured during server receive\n");
@@ -54,6 +56,7 @@ public class Server {
             }    
         }
 
-        System.out.printf("connection to client ended w/ %d bytes recieved\n", totalBytes);
+        System.out.printf("received=%d KB rate=%f Mbps", totalBytes / 1000, (totalBytes /(1000^2)) / (totalTime/1000));
+        //System.out.printf("connection to client ended w/ %d bytes recieved\n", totalBytes);
     }
 }

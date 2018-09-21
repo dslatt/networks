@@ -61,10 +61,10 @@ public class Client {
                 }
             }
             if (out != null) dataSent = out.size();
-            System.out.println("datasent == "  + dataSent);
         }
 
-        System.out.printf("client ended after %d seconds while sending %d bytes\n", TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis() - startTime), dataSent);
+        System.out.printf("sent=%d KB rate=%f Mbps", dataSent / 1000, (dataSent / (1000^2)) / time);
+        //System.out.printf("client ended after %d seconds while sending %d bytes\n", TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis() - startTime), dataSent);
 
     }
 
