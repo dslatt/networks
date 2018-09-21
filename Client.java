@@ -63,7 +63,7 @@ public class Client {
             if (out != null) dataSent = out.size();
         }
 
-        System.out.printf("sent=%d KB rate=%f Mbps", dataSent / 1000, ((double)dataSent / (1000^2)) / (double)time);
+        System.out.printf("sent=%d KB rate=%f Mbps", dataSent / 1000, ((double)dataSent / (1000.0^2)) / (double)time);
         //System.out.printf("client ended after %d seconds while sending %d bytes\n", TimeUnit.MILLISECONDS.toSeconds(System.currentTimeMillis() - startTime), dataSent);
 
     }
