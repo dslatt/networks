@@ -35,11 +35,13 @@ public class Client {
 
         Socket client = null;
 
+	DataOutputStream out = null;
+
         try {
             // create socket connection to server
             client = new Socket(host, port);
 
-            DataOutputStream out = new DataOutputStream(client.getOutputStream());
+            out = new DataOutputStream(client.getOutputStream());
 
             startTime = System.currentTimeMillis();
             endTime = startTime + 1000*time;
@@ -57,7 +59,7 @@ public class Client {
                     System.out.printf("Error closing client socket\n");
                 }
             }
-            dataSent = out.size();
+            if (out != null) dataSent = out.size();
             System.out.println("datasent == "  + dataSent);
         }
 
