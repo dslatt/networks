@@ -8,7 +8,6 @@ FIND = find
 	$(JC) $(JFLAGS) $*.java
 
 CLASSES = \
-        picocli/CommandLine.java \
 	Client.java \
 	Server.java \
         Iperfer.java 
