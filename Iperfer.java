@@ -35,11 +35,13 @@ public class Iperfer implements Runnable {
         if(clientMode){
             Client client = new Client(port, host, time);
             client.start();
+            client.printResults();
         }else if(serverMode){
             Server server = new Server(port);
             server.start();
+            server.printResults();
         }else{
-            System.out.printf("Error: Must specify mode (client '-c' or server -s')\n");
+            System.out.printf("Error: Must specify mode (client '-c' or server -s')%n");
         }
     }
 

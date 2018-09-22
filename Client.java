@@ -19,17 +19,28 @@ public class Client {
     private String host;
     private int time;
 
+    private Timer timer;
+
+    private long dataSent = 0;
+
     Client(int port, String host, int time) {
         this.port = port;
         this.host = host;
         this.time = time;
     }
 
+    class KillTask extends TimerTask {
+        public void run() {
+            killFlag = false;
+            timer.cancel();
+        }
+    }
+
     public void start() {
         
         byte[] data = new byte[Iperfer.BLOCK_SIZE];
 
-        int dataSent = 0;
+        dataSent = 0;
 
         long startTime = 0;
         long endTime = 0;
@@ -38,33 +49,28 @@ public class Client {
 
 	DataOutputStream out = null;
 
-        Timer cutoffTimer = new Timer();
+        timer = new Timer();
 
         try {
             // create socket connection to server
-            client = new Socket();
+            client = new Socket(host,port);
 
-            client.connect(new InetSocketAddress(host,port), CLIENT_TIMEOUT);
-
-            cutoffTimer.schedule(new TimerTask() {
-                   @Override
-                   public void run() {
-                       killFlag = false; 
-                   }
-            }, time * 1000);
+            /* client.connect(new InetSocketAddress(host,port), CLIENT_TIMEOUT); */
 
             out = new DataOutputStream(client.getOutputStream());
 
-            //startTime = System.currentTimeMillis();
-            //endTime = startTime + TimeUnit.SECONDS.toMillis(time);
+            timer.schedule(new KillTask(), time * 1000);
+            startTime = System.currentTimeMillis();
 
-            //while (System.currentTimeMillis() < endTime) {
             while (killFlag) {
                 out.write(data, 0, data.length);
+                dataSent += data.length;
             }
-
+            
+            endTime = System.currentTimeMillis();
         } catch(IOException e) {
             System.out.printf("Error: IOException occured during client transmit%n");
+            e.printStackTrace();
         } finally {
             if (client != null) {
                 try {
@@ -73,10 +79,15 @@ public class Client {
                     System.out.printf("Error: Failed closing client socket%n");
                 }
             }
-            if (out != null) dataSent = out.size();
+            /* if (out != null) dataSent = out.size(); */
         }
 
-        System.out.printf("sent=%d KB rate=%f Mbps%n", dataSent / 1000, (dataSent / Math.pow(1000,2)) / time);
+    }
+
+    public void printResults() {
+        System.out.printf( "sent=%d KB rate=%f Mbps%n", 
+                            dataSent / 1000,
+                            (dataSent / Math.pow(1000,2)) / time);
     }
 
 }

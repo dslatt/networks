@@ -12,6 +12,10 @@ public class Server {
     
     private int port;
 
+    private long dataRecieved = 0;
+    private long startTime = 0;
+    private long endTime = 0;
+
     Server(int port) {
         this.port = port;
     }
@@ -20,9 +24,7 @@ public class Server {
 
         byte[] data = new byte[Iperfer.BLOCK_SIZE]; 
 
-        int totalBytes = 0;
-        int numBytes = 0;
-        long totalTime = 0;
+        long numBytes = 0;
 
         ServerSocket socket = null;
 
@@ -33,12 +35,15 @@ public class Server {
             // block until client socket obtained
             Socket client = socket.accept();
 
+            startTime = System.currentTimeMillis();
+
             InputStream in = client.getInputStream();
 
             while((numBytes = in.read(data, 0, data.length)) != -1) {
-                totalBytes += numBytes;
-                totalTime = System.currentTimeMillis();
+                dataRecieved += numBytes;
             }
+
+            endTime = System.currentTimeMillis();
 
         } catch(IOException e) {
             System.out.printf("Error: IOException occured during server receive%n");
@@ -51,7 +56,13 @@ public class Server {
                 }
             }    
         }
-
-        System.out.printf("received=%d KB rate=%f Mbps%n", totalBytes / 1000, (totalBytes / Math.pow(1000,2)) / (totalTime/1000));
     }
+
+    public void printResults() {
+        System.out.printf( "received=%d KB rate=%f Mbps%n",
+                            dataRecieved / 1000,
+                            (dataRecieved / Math.pow(1000,2)) / ((endTime - startTime )/ 1000));
+
+    }
+
 }
