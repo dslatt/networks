@@ -54,6 +54,12 @@ public class Iperfer implements Runnable {
     }
 
     public static void main(String[] args){
-        CommandLine.run(new Iperfer(), args);
+//        CommandLine.run(new Iperfer(), args);
+
+        CommandLine cli = new CommandLine(new Iperfer())
+                            .addSubcommand("-c", new Client())
+                            .addSubcommand("-s", new Server());
+        List<CommandLine> parsed = commandLine.parse(args);
+        handleParseResult(parsed);
     }
 }
