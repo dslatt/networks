@@ -1,5 +1,6 @@
 /*
  * Iperfer network performance tool
+ * server/client
  */
 
 import java.io.*;
