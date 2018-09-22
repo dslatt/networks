@@ -11,7 +11,7 @@ import java.lang.*;
 public class Client {
 
     // timeout value on socket connection in millis
-    private static final int CLIENT_TIMEOUT = 10000;
+    private static final int CLIENT_TIMEOUT = 5000;
 
     public volatile boolean killFlag = true;
 
@@ -47,23 +47,23 @@ public class Client {
 
         Socket client = null;
 
-	DataOutputStream out = null;
+	OutputStream out = null;
 
         timer = new Timer();
 
         try {
             // create socket connection to server
-            client = new Socket(host,port);
+            client = new Socket();
 
-            /* client.connect(new InetSocketAddress(host,port), CLIENT_TIMEOUT); */
+            client.connect(new InetSocketAddress(host,port), CLIENT_TIMEOUT);
 
-            out = new DataOutputStream(client.getOutputStream());
+            out = client.getOutputStream();
 
             timer.schedule(new KillTask(), time * 1000);
             startTime = System.currentTimeMillis();
 
             while (killFlag) {
-                out.write(data, 0, data.length);
+                out.write(data);
                 dataSent += data.length;
             }
             
