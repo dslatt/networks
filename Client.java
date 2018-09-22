@@ -15,15 +15,20 @@ public class Client {
 
     public volatile boolean killFlag = true;
 
+    private boolean exitError = false;
+
     private int port;
     private String host;
-    private int time;
+    private long time;
 
     private Timer timer;
 
+    private long startTime = 0;
+    private long endTime = 0;
+
     private long dataSent = 0;
 
-    Client(int port, String host, int time) {
+    Client(int port, String host, long time) {
         this.port = port;
         this.host = host;
         this.time = time;
@@ -42,52 +47,55 @@ public class Client {
 
         dataSent = 0;
 
-        long startTime = 0;
-        long endTime = 0;
-
         Socket client = null;
-
-	BufferedOutputStream out = null;
+	OutputStream out = null;
+        InetAddress validHost = null;
 
         timer = new Timer();
+        client = new Socket();
 
         try {
-            // create socket connection to server
-            client = new Socket();
+            validHost = InetAddress.getByName(host);
+            client.connect(new InetSocketAddress(validHost,port), CLIENT_TIMEOUT);
+            out = client.getOutputStream();
 
-            client.connect(new InetSocketAddress(host,port), CLIENT_TIMEOUT);
-
-            out = new BufferedOutputStream(client.getOutputStream());
-
+            // schedule TimerTask to stop client send after 'time' seconds
             timer.schedule(new KillTask(), time * 1000);
             startTime = System.currentTimeMillis();
 
             while (killFlag) {
-                out.write(data, 0, data.length);
+                out.write(data);
                 dataSent += data.length;
             }
             
             endTime = System.currentTimeMillis();
+        } catch(SocketTimeoutException e) {
+            System.out.printf("Error: Timeout during socket connection%n");
+            exitError = true;
+        } catch(UnknownHostException e) {
+            System.out.printf("Error: Invalid hostname%n");
+            exitError = true;
         } catch(IOException e) {
-            System.out.printf("Error: IOException occured during client transmit%n");
-            e.printStackTrace();
+            System.out.printf("Error: IO error occured during client connection%n"); 
+            exitError = true;
         } finally {
             if (client != null) {
                 try {
                     client.close();
                 } catch(IOException e){
                     System.out.printf("Error: Failed closing client socket%n");
+                    exitError = true;
                 }
             }
-            /* if (out != null) dataSent = out.size(); */
+            if (exitError)
+                System.exit(1);
         }
-
     }
 
     public void printResults() {
         System.out.printf( "sent=%d KB rate=%f Mbps%n", 
                             dataSent / 1000,
-                            (dataSent / Math.pow(1000,2)) / time);
+                            (double)(dataSent / 1000) / (endTime - startTime));
     }
 
 }
