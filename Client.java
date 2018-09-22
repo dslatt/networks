@@ -47,7 +47,7 @@ public class Client {
 
         Socket client = null;
 
-	OutputStream out = null;
+	BufferedOutputStream out = null;
 
         timer = new Timer();
 
@@ -57,13 +57,13 @@ public class Client {
 
             client.connect(new InetSocketAddress(host,port), CLIENT_TIMEOUT);
 
-            out = client.getOutputStream();
+            out = new BufferedOutputStream(client.getOutputStream());
 
             timer.schedule(new KillTask(), time * 1000);
             startTime = System.currentTimeMillis();
 
             while (killFlag) {
-                out.write(data);
+                out.write(data, 0, data.length);
                 dataSent += data.length;
             }
             
