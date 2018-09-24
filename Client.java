@@ -92,10 +92,9 @@ public class Client {
     }
 
     public void printResults() {
-        System.out.printf("end time: %d%nstart time: %d%nelapsed time: %d%n", endTime, startTime, endTime-startTime);
         System.out.printf( "sent=%d KB rate=%f Mbps%n", 
                             dataSent / 1000,
-                            (double)(dataSent / 1000) / (endTime - startTime));
+                            (double)((dataSent*8) / 1000) / (endTime - startTime));
     }
 
 }
