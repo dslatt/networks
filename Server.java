@@ -69,6 +69,7 @@ public class Server {
     }
 
     public void printResults() {
+        System.out.printf("end time: %d%nstart time: %d%nelapsed time: %d%n", endTime, startTime, endTime-startTime);
         System.out.printf( "received=%d KB rate=%f Mbps%n",
                             dataRecieved / 1000,
                             (double)(dataRecieved / 1000) / (endTime - startTime));
