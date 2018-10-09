@@ -1,6 +1,0 @@
-cs640 iperf java tool
-
-simple network test over socket connection
-uses picocli for parsing
-
-simplecli branch: uses super basic parsing code instead of picocli
