@@ -4,7 +4,11 @@ import edu.wisc.cs.sdn.vnet.Device;
 import edu.wisc.cs.sdn.vnet.DumpFile;
 import edu.wisc.cs.sdn.vnet.Iface;
 
+import java.nio.ByteBuffer;
+import java.util.Iterator;
+
 import net.floodlightcontroller.packet.Ethernet;
+import net.floodlightcontroller.packet.IPv4;
 
 /**
  * @author Aaron Gember-Jacobson and Anubhavnidhi Abhashkumar
@@ -84,7 +88,96 @@ public class Router extends Device
 		
 		/********************************************************************/
 		/* TODO: Handle packets                                             */
-		
+/*
+                1 - if packet is not IPv4: drop it
+                2 - verify packet checksum
+                     - only compute over the IP header (read length of 'length' field)
+                     - must zero out the checksum field in header before computation
+                     - utilize serialize() from IPv4 class to compute
+                     - if incorrect drop the packet
+                3 - verify packet TTL (how many hops left?)
+                    - decrement existing TTL by 1
+                    - if resultsing TTL is 0 or less than drop packet
+                4 - check if packet if for one of router interfaces
+                    - use the interfaces list from superclass Device
+                    - if packets dest IP matches an interface, just drop the packet
+
+                5 - next step is to forward the packet according to table entries
+                    - use lookup from Router to get correct RouteEntry for dest IP
+                    - if no match just drop packet
+                6 - determine next hop IP and MAC
+                    - call lookup from ArpCache to get the next MAC (new dest MAC)
+                    - MAC of outgoing interface should be set as source MAC
+                7 - call sendPacket to send the packet 
+
+                to drop packet just return w/o doing any send
+*/   
+                if (etherPacket.getEtherType() != Ethernet.TYPE_IPv4){
+                    System.out.println("dropped packet due to type mismatch");
+                    return;
+                }
+
+                IPv4 ipacket = (IPv4)etherPacket.getPayload();
+                short checksum = ipacket.getChecksum();
+
+                ipacket.resetChecksum();
+
+                // sets the checksum, headerLength, and totalLength fields
+                byte[] sipacket = ipacket.serialize();
+
+                System.out.printf("checksum found: %d\tchecksum calc: %d\n", checksum, ByteBuffer.wrap(sipacket).getShort(10));
+
+                // use the fresh calculated checksum from serialize                
+                if (ByteBuffer.wrap(sipacket).getShort(10) != checksum){
+                    System.out.println("dropped packet due to bad checksum");
+                    return;
+                }
+
+                System.out.printf("found ttl %d\tnew ttl: %d\n", ipacket.getTtl(), (byte)(ipacket.getTtl() - 1));
+
+                ipacket.setTtl((byte)(ipacket.getTtl() - 1));
+                if (ipacket.getTtl() <= 0){
+                    System.out.println("dropped packet due to zero ttl");
+                    return;
+                }
+
+                boolean killLoop = false;
+                // check router interfaces
+                Iterator<Iface> ifacesItr = super.getInterfaces() .values().iterator();
+                System.out.println("name\tip\tmac\n");
+                while(ifacesItr.hasNext()){
+                    Iface iff = ifacesItr.next();
+                    System.out.printf("%s\t%s\t%s\n", iff.getName(), IPv4.fromIPv4Address(iff.getIpAddress()), iff.getMacAddress().toString());
+                    if (iff.getIpAddress() == ipacket.getDestinationAddress()){
+                        //System.out.println("dropped packet due to dest IP matching router interface IP");
+                        killLoop = true;
+                        //return;
+                    }
+                } 
+
+                if (killLoop){
+                    System.out.println("dropped packet due to dest IP matching router interface IP");
+                    return;
+                }
+
+                RouteEntry matchEntry;
+                if ((matchEntry = routeTable.lookup(ipacket.getDestinationAddress())) == null){
+                    System.out.println("dropped packet due to no valid match found in routeTable");
+                    return;
+                }
+
+                ArpEntry macMapping;
+                int destAddr = matchEntry.getDestinationAddress();
+                if ((macMapping = arpCache.lookup(destAddr)) == null){
+                    System.out.println("error: no arp mapping found");
+                    return;
+                } 
+
+                etherPacket.setDestinationMACAddress(macMapping.getMac().toBytes()); 
+                etherPacket.setSourceMACAddress(matchEntry.getInterface().getMacAddress().toBytes());
+
+                super.sendPacket(etherPacket, matchEntry.getInterface());
+                
 		
 		/********************************************************************/
 	}

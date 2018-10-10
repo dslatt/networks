@@ -19,7 +19,7 @@ import java.util.TimerTask;
 public class Switch extends Device
 {	
 
-        private static final int MAC_TBL_INIT_SIZE = 64;
+        private static final int MAC_TBL_INIT_SIZE = 16;
         private static final int MAC_TBL_TIMEOUT = 15;
         private static final int TMOUT_FREQ = 1;
 
@@ -51,7 +51,7 @@ public class Switch extends Device
                         map.getValue().setTimeout(map.getValue().getTimeout() - 1);
                     }
                 }
-//                printTable();
+ //               printTable();
             }
         }
 
@@ -71,9 +71,8 @@ public class Switch extends Device
                     else purge mapping from table
                     * keep it thread safe !! *
 
-                    use wrapper functions for all table access to keep thread safe
-                    HashTable - synchronised hashmap
                     ConcurrentHashMap
+                    possibly switch to using Mac.toString() to keep the key value immutable
                     */
 
                 macTable = new ConcurrentHashMap<MACAddress, SwitchTblEntry>(MAC_TBL_INIT_SIZE);
