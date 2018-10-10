@@ -141,6 +141,9 @@ public class Router extends Device
                     return;
                 }
 
+                // need to compute new checksum after updating ttl
+                ipacket.serialize();
+
                 boolean killLoop = false;
                 // check router interfaces
                 Iterator<Iface> ifacesItr = super.getInterfaces() .values().iterator();
@@ -166,9 +169,14 @@ public class Router extends Device
                     return;
                 }
 
+                int useAddr;
+                // if gateway = 0 use destination, else use gateway
+                if ((useAddr = matchEntry.getGatewayAddress()) == 0){
+                    useAddr = matchEntry.getDestinationAddress();
+                }
+
                 ArpEntry macMapping;
-                int destAddr = matchEntry.getDestinationAddress();
-                if ((macMapping = arpCache.lookup(destAddr)) == null){
+                if ((macMapping = arpCache.lookup(useAddr)) == null){
                     System.out.println("error: no arp mapping found");
                     return;
                 } 
