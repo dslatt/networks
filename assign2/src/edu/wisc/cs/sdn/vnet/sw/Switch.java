@@ -39,19 +39,16 @@ public class Switch extends Device
 
         class TimeoutTask extends TimerTask {
             public void run(){
-//                System.out.println("start timeout task " + System.currentTimeMillis());
                 Map.Entry<MACAddress, SwitchTblEntry> map;
                 Iterator<Map.Entry> itr = macTable.entrySet().iterator();
                 while(itr.hasNext()){
                     map = itr.next();
                     if (map.getValue().getTimeout() == 0){
-//                        System.out.println("removed entry w/ mac " + map.getKey().toString());
                         macTable.remove(map.getKey());
                     }else{
                         map.getValue().setTimeout(map.getValue().getTimeout() - 1);
                     }
                 }
- //               printTable();
             }
         }
 
@@ -69,10 +66,6 @@ public class Switch extends Device
                 - for each mapping table entry
                     if timeout != 0 then decrement by 1
                     else purge mapping from table
-                    * keep it thread safe !! *
-
-                    ConcurrentHashMap
-                    possibly switch to using Mac.toString() to keep the key value immutable
                     */
 
                 macTable = new ConcurrentHashMap<MACAddress, SwitchTblEntry>(MAC_TBL_INIT_SIZE);
@@ -120,7 +113,6 @@ public class Switch extends Device
                 if ((map = (SwitchTblEntry)macTable.get(etherPacket.getDestinationMAC())) != null){
                     super.sendPacket(etherPacket, map.getIface());
                 }else{
-                    // flood 
                     Iterator<Iface> itr = super.getInterfaces().values().iterator();
                     while(itr.hasNext()){
                         Iface pktIface = itr.next();

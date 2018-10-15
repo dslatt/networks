@@ -101,7 +101,6 @@ public class Router extends Device
                 4 - check if packet if for one of router interfaces
                     - use the interfaces list from superclass Device
                     - if packets dest IP matches an interface, just drop the packet
-
                 5 - next step is to forward the packet according to table entries
                     - use lookup from Router to get correct RouteEntry for dest IP
                     - if no match just drop packet
@@ -112,11 +111,6 @@ public class Router extends Device
 
                 to drop packet just return w/o doing any send
 */   
-
-                /*if (1 == 1){
-                    System.out.println(routeTable.toString());
-                return;
-                }*/
 
                 if (etherPacket.getEtherType() != Ethernet.TYPE_IPv4){
                     System.out.println("dropped packet due to type mismatch");
@@ -131,15 +125,11 @@ public class Router extends Device
                 // sets the checksum, headerLength, and totalLength fields
                 byte[] sipacket = ipacket.serialize();
 
-                System.out.printf("checksum found: %d\tchecksum calc: %d\n", checksum, ByteBuffer.wrap(sipacket).getShort(10));
-
                 // use the fresh calculated checksum from serialize                
                 if (ByteBuffer.wrap(sipacket).getShort(10) != checksum){
                     System.out.println("dropped packet due to bad checksum");
                     return;
                 }
-
-                System.out.printf("found ttl %d\tnew ttl: %d\n", ipacket.getTtl(), (byte)(ipacket.getTtl() - 1));
 
                 ipacket.setTtl((byte)(ipacket.getTtl() - 1));
                 if (ipacket.getTtl() <= 0){
@@ -148,9 +138,9 @@ public class Router extends Device
                 }
 
                 // need to compute new checksum after updating ttl
+                ipacket.resetChecksum();
                 ipacket.serialize();
 
-                boolean killLoop = false;
                 // check router interfaces
                 Iterator<Iface> ifacesItr = super.getInterfaces() .values().iterator();
                 System.out.println("name\tip\tmac\n");
@@ -158,17 +148,11 @@ public class Router extends Device
                     Iface iff = ifacesItr.next();
                     System.out.printf("%s\t%s\t%s\n", iff.getName(), IPv4.fromIPv4Address(iff.getIpAddress()), iff.getMacAddress().toString());
                     if (iff.getIpAddress() == ipacket.getDestinationAddress()){
-                        //System.out.println("dropped packet due to dest IP matching router interface IP");
-                        killLoop = true;
-                        //return;
+                        return;
                     }
                 } 
 
-                if (killLoop){
-                    System.out.println("dropped packet due to dest IP matching router interface IP");
-                    return;
-                }
-
+                // lookup route table entry
                 RouteEntry matchEntry;
                 if ((matchEntry = routeTable.lookup(ipacket.getDestinationAddress())) == null){
                     System.out.println("dropped packet due to no valid match found in routeTable");
@@ -176,28 +160,27 @@ public class Router extends Device
                 }
 
                 int useAddr;
+
                 // if gateway = 0 use destination, else use gateway
                 if ((useAddr = matchEntry.getGatewayAddress()) == 0){
                     System.out.println("using dest ip (gateway = 0)");
                     useAddr = ipacket.getDestinationAddress();
                 }
 
-                System.out.printf("useaddr: %s%n", IPv4.fromIPv4Address(useAddr));
-
+                // ARP lookup
                 ArpEntry macMapping;
                 if ((macMapping = arpCache.lookup(useAddr)) == null){
                     System.out.println("error: no arp mapping found");
                     return;
                 } 
 
+                //set the MACs as necessary before sending
                 etherPacket.setDestinationMACAddress(macMapping.getMac().toBytes()); 
                 etherPacket.setSourceMACAddress(matchEntry.getInterface().getMacAddress().toBytes());
 
-                System.out.println("iface " + matchEntry.getInterface().getName());
                 super.sendPacket(etherPacket, matchEntry.getInterface());
                 
-                System.out.println("packet sent!");
-                printPacket(etherPacket);
+                //printPacket(etherPacket);
 		
 		/********************************************************************/
 	}
@@ -207,7 +190,6 @@ public class Router extends Device
             IPv4 ipkt = (IPv4)packet.getPayload();
             System.out.printf("dest IP: %s%nsrc IP %s%n", IPv4.fromIPv4Address(ipkt.getDestinationAddress()), IPv4.fromIPv4Address(ipkt.getSourceAddress()));
 
-		System.out.println("*** -> Send packet: " +
-                packet.toString().replace("\n", "\n\t"));
+	    System.out.println("*** -> Send packet: " + packet.toString().replace("\n", "\n\t"));
         }
 }

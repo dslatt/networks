@@ -41,17 +41,12 @@ public class RouteTable
 			/*****************************************************************/
 			/* TODO: Find the route entry with the longest prefix match      */
 		/*	
-                        sounds to me like we need to check this on the destination ip
                         foreach entry:
-                            and the search ip w/ the mask
+                            bitwise and the search ip w/ the mask
                             if this equals the destination ip its a valid entry
                             
-                            in order to do longest prefix match choose the one w/ the longest mask? 
-                            ? in the above check use the destionation ip as entry dst ip & mask? maybe idk
-
+                            in order to do longest prefix match choose the one w/ the longest mask 
                 */
-
-               System.out.println("entires #: " + entries.size());
 
                 RouteEntry returnEntry = null;
                 int largePrefix = 0;
@@ -62,6 +57,7 @@ public class RouteTable
                     int maskedIp = entry.getMaskAddress() & ip;
                     if (maskedIp == entry.getDestinationAddress()){
 
+                        // count # of set bits in mask starting from left
                         int prefix = 0;
                         int mask = entry.getMaskAddress();
                         while (mask != 0 && ((mask >> 31) != 0)){
