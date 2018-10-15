@@ -112,6 +112,12 @@ public class Router extends Device
 
                 to drop packet just return w/o doing any send
 */   
+
+                /*if (1 == 1){
+                    System.out.println(routeTable.toString());
+                return;
+                }*/
+
                 if (etherPacket.getEtherType() != Ethernet.TYPE_IPv4){
                     System.out.println("dropped packet due to type mismatch");
                     return;
@@ -172,8 +178,11 @@ public class Router extends Device
                 int useAddr;
                 // if gateway = 0 use destination, else use gateway
                 if ((useAddr = matchEntry.getGatewayAddress()) == 0){
-                    useAddr = matchEntry.getDestinationAddress();
+                    System.out.println("using dest ip (gateway = 0)");
+                    useAddr = ipacket.getDestinationAddress();
                 }
+
+                System.out.printf("useaddr: %s%n", IPv4.fromIPv4Address(useAddr));
 
                 ArpEntry macMapping;
                 if ((macMapping = arpCache.lookup(useAddr)) == null){
@@ -184,9 +193,21 @@ public class Router extends Device
                 etherPacket.setDestinationMACAddress(macMapping.getMac().toBytes()); 
                 etherPacket.setSourceMACAddress(matchEntry.getInterface().getMacAddress().toBytes());
 
+                System.out.println("iface " + matchEntry.getInterface().getName());
                 super.sendPacket(etherPacket, matchEntry.getInterface());
                 
+                System.out.println("packet sent!");
+                printPacket(etherPacket);
 		
 		/********************************************************************/
 	}
+
+        public static void printPacket(Ethernet packet){
+            System.out.printf("dest MAC: %s%nsrc MAC: %s%n", packet.getDestinationMAC().toString(), packet.getSourceMAC().toString());
+            IPv4 ipkt = (IPv4)packet.getPayload();
+            System.out.printf("dest IP: %s%nsrc IP %s%n", IPv4.fromIPv4Address(ipkt.getDestinationAddress()), IPv4.fromIPv4Address(ipkt.getSourceAddress()));
+
+		System.out.println("*** -> Send packet: " +
+                packet.toString().replace("\n", "\n\t"));
+        }
 }

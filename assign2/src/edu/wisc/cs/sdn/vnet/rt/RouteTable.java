@@ -8,6 +8,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.Iterator;
 
 import net.floodlightcontroller.packet.IPv4;
 
@@ -39,8 +40,43 @@ public class RouteTable
         {
 			/*****************************************************************/
 			/* TODO: Find the route entry with the longest prefix match      */
-			
-			return null;
+		/*	
+                        sounds to me like we need to check this on the destination ip
+                        foreach entry:
+                            and the search ip w/ the mask
+                            if this equals the destination ip its a valid entry
+                            
+                            in order to do longest prefix match choose the one w/ the longest mask? 
+                            ? in the above check use the destionation ip as entry dst ip & mask? maybe idk
+
+                */
+
+               System.out.println("entires #: " + entries.size());
+
+                RouteEntry returnEntry = null;
+                int largePrefix = 0;
+
+                Iterator<RouteEntry> itr = entries.iterator();
+                while(itr.hasNext()){
+                    RouteEntry entry = itr.next();
+                    int maskedIp = entry.getMaskAddress() & ip;
+                    if (maskedIp == entry.getDestinationAddress()){
+
+                        int prefix = 0;
+                        int mask = entry.getMaskAddress();
+                        while (mask != 0 && ((mask >> 31) != 0)){
+                            mask =  mask & (mask << 1);
+                            prefix++;
+                        }
+
+                        if (prefix > largePrefix){
+                            returnEntry = entry;
+                            largePrefix = prefix;
+                        }
+                    }
+                }
+
+                return returnEntry;
 			
 			/*****************************************************************/
         }
