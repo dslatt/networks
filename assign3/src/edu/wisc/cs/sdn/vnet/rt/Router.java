@@ -5,6 +5,7 @@ import edu.wisc.cs.sdn.vnet.DumpFile;
 import edu.wisc.cs.sdn.vnet.Iface;
 
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.Iterator;
 
 import net.floodlightcontroller.packet.Data;
@@ -243,7 +244,7 @@ public class Router extends Device
             icmp.setPayload(ip.getPayload());
         }else{
             ip.setSourceAddress(inface.getIpAddress());
-            icmp.setPayload(new Data());
+            icmp.setPayload(new Data(buildICMPPayload(ipacket)));
         }
 
         ether.setEtherType(Ethernet.TYPE_IPv4);
@@ -271,6 +272,21 @@ public class Router extends Device
         }
 
         super.sendPacket(ether, inface);
+
+    }
+
+    private byte[] buildICMPPayload(IPv4 ipacket){
+        byte[] padding = new byte[4];
+        byte[] ipHeader = ipacket.serialize();
+        byte[] end = Arrays.copyOfRange(ipacket.getPayload().serialize(), 0, 8);
+
+        byte[] payload = new byte[ipHeader.length + padding.length + end.length];
+
+        System.arraycopy(padding, 0, payload, 0, padding.length);
+        System.arraycopy(ipHeader, 0, payload, padding.length, ipHeader.length);
+        System.arraycopy(end, 0, payload, padding.length + ipHeader.length, end.length);
+
+        return payload;
 
     }
 
