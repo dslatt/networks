@@ -7,12 +7,38 @@ import edu.wisc.cs.sdn.vnet.Iface;
 import java.nio.ByteBuffer;
 import java.util.Iterator;
 
+import net.floodlightcontroller.packet.Data;
 import net.floodlightcontroller.packet.Ethernet;
+import net.floodlightcontroller.packet.ICMP;
 import net.floodlightcontroller.packet.IPv4;
 
 /**
  * @author Aaron Gember-Jacobson and Anubhavnidhi Abhashkumar
  */
+
+enum TypeICMP {
+    TIME_EXCEDDED   (b(11), b(0)),
+    NET_UNREACH     (b(3), b(0)),
+    HOST_UNREACH    (b(3), b(1)),
+    PORT_UNREACH    (b(3), b(3)),
+    ECHO_REPLY      (b(0), b(0));
+
+    private final byte type;
+    private final byte code;
+
+    TypeICMP (byte type, byte code){
+        this.type = type;
+        this.code = code;
+    }
+
+    private static byte b(int b){
+        return (byte)b;
+    }
+
+    public byte type() { return type; }
+    public byte code() { return code; }
+}
+
 public class Router extends Device
 {	
 	/** Routing table for the router */
@@ -20,7 +46,9 @@ public class Router extends Device
 	
 	/** ARP cache for the router */
 	private ArpCache arpCache;
-	
+
+    private static final byte MAX_TTL = 64;
+
 	/**
 	 * Creates a router for a specific host.
 	 * @param host hostname for the router
@@ -134,7 +162,7 @@ public class Router extends Device
                 ipacket.setTtl((byte)(ipacket.getTtl() - 1));
                 if (ipacket.getTtl() <= 0){
                     System.out.println("dropped packet due to zero ttl");
-                    return;
+                    icmpSend(TypeICMP.TIME_EXCEDDED, etherPacket, ipacket, inIface);
                 }
 
                 // need to compute new checksum after updating ttl
@@ -148,7 +176,16 @@ public class Router extends Device
                     Iface iff = ifacesItr.next();
                     System.out.printf("%s\t%s\t%s\n", iff.getName(), IPv4.fromIPv4Address(iff.getIpAddress()), iff.getMacAddress().toString());
                     if (iff.getIpAddress() == ipacket.getDestinationAddress()){
-                        return;
+                        if (ipacket.getProtocol() == IPv4.PROTOCOL_ICMP){
+                            if (((ICMP)ipacket.getPayload()).getIcmpType() == (byte)8){
+                                icmpSend(TypeICMP.ECHO_REPLY, etherPacket, ipacket, inIface);
+                            }else{
+                                System.out.println("dropped ICMP packet matching interface (not echo request)");
+                                return;
+                            }
+                        }else{
+                            icmpSend(TypeICMP.PORT_UNREACH, etherPacket, ipacket, inIface);
+                        }
                     }
                 } 
 
@@ -156,7 +193,7 @@ public class Router extends Device
                 RouteEntry matchEntry;
                 if ((matchEntry = routeTable.lookup(ipacket.getDestinationAddress())) == null){
                     System.out.println("dropped packet due to no valid match found in routeTable");
-                    return;
+                    icmpSend(TypeICMP.NET_UNREACH, etherPacket, ipacket, inIface);
                 }
 
                 int useAddr;
@@ -171,9 +208,9 @@ public class Router extends Device
                 ArpEntry macMapping;
                 if ((macMapping = arpCache.lookup(useAddr)) == null){
                     System.out.println("error: no arp mapping found");
-                    return;
+                    icmpSend(TypeICMP.HOST_UNREACH, etherPacket, ipacket, inIface);
                 } 
-
+                
                 //set the MACs as necessary before sending
                 etherPacket.setDestinationMACAddress(macMapping.getMac().toBytes()); 
                 etherPacket.setSourceMACAddress(matchEntry.getInterface().getMacAddress().toBytes());
@@ -185,11 +222,63 @@ public class Router extends Device
 		/********************************************************************/
 	}
 
-        public static void printPacket(Ethernet packet){
-            System.out.printf("dest MAC: %s%nsrc MAC: %s%n", packet.getDestinationMAC().toString(), packet.getSourceMAC().toString());
-            IPv4 ipkt = (IPv4)packet.getPayload();
-            System.out.printf("dest IP: %s%nsrc IP %s%n", IPv4.fromIPv4Address(ipkt.getDestinationAddress()), IPv4.fromIPv4Address(ipkt.getSourceAddress()));
+    public void icmpSend(TypeICMP type, Ethernet etherPacket, IPv4 ipacket, Iface inface){
 
-	    System.out.println("*** -> Send packet: " + packet.toString().replace("\n", "\n\t"));
+        Ethernet ether = new Ethernet();
+        IPv4 ip = new IPv4();
+        ICMP icmp = new ICMP();
+
+        ether.setPayload(ip);
+        ip.setPayload(icmp);
+
+        icmp.setIcmpType(type.type());
+        icmp.setIcmpCode(type.code());
+
+        ip.setTtl(MAX_TTL);
+        ip.setProtocol(IPv4.PROTOCOL_ICMP);
+        ip.setDestinationAddress(ipacket.getSourceAddress());
+
+        if (type == TypeICMP.ECHO_REPLY) {
+            ip.setSourceAddress(ipacket.getDestinationAddress()); 
+            icmp.setPayload(ip.getPayload());
+        }else{
+            ip.setSourceAddress(inface.getIpAddress());
+            icmp.setPayload(new Data());
         }
+
+        ether.setEtherType(Ethernet.TYPE_IPv4);
+        ether.setSourceMACAddress(inface.getMacAddress().toBytes());
+
+        RouteEntry ipMatch;
+
+        if ((ipMatch = routeTable.lookup(ip.getDestinationAddress())) == null) {
+            System.out.println("icmp route table failure\nsomething is very wrong");
+            return;
+        }else{
+            int arpIp;
+            ArpEntry arpMatch;
+            
+            if ((arpIp = ipMatch.getGatewayAddress()) == 0){
+               arpIp = ipMatch.getDestinationAddress(); 
+            }
+
+            if ((arpMatch = arpCache.lookup(arpIp)) == null){
+                System.out.println("icmp arp lookup failed\nsomething is very wrong again");
+                return;
+            }else{
+                ether.setDestinationMACAddress(arpMatch.getMac().toBytes());
+            }
+        }
+
+        super.sendPacket(ether, inface);
+
+    }
+
+    public static void printPacket(Ethernet packet){
+        System.out.printf("dest MAC: %s%nsrc MAC: %s%n", packet.getDestinationMAC().toString(), packet.getSourceMAC().toString());
+        IPv4 ipkt = (IPv4)packet.getPayload();
+        System.out.printf("dest IP: %s%nsrc IP %s%n", IPv4.fromIPv4Address(ipkt.getDestinationAddress()), IPv4.fromIPv4Address(ipkt.getSourceAddress()));
+
+        System.out.println("*** -> Send packet: " + packet.toString().replace("\n", "\n\t"));
+    }
 }
