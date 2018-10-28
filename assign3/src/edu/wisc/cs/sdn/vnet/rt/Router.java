@@ -164,6 +164,7 @@ public class Router extends Device
                 if (ipacket.getTtl() <= 0){
                     System.out.println("dropped packet due to zero ttl");
                     icmpSend(TypeICMP.TIME_EXCEDDED, etherPacket, ipacket, inIface);
+                    return;
                 }
 
                 // need to compute new checksum after updating ttl
@@ -180,12 +181,14 @@ public class Router extends Device
                         if (ipacket.getProtocol() == IPv4.PROTOCOL_ICMP){
                             if (((ICMP)ipacket.getPayload()).getIcmpType() == (byte)8){
                                 icmpSend(TypeICMP.ECHO_REPLY, etherPacket, ipacket, inIface);
+                                return;
                             }else{
                                 System.out.println("dropped ICMP packet matching interface (not echo request)");
                                 return;
                             }
                         }else{
                             icmpSend(TypeICMP.PORT_UNREACH, etherPacket, ipacket, inIface);
+                            return;
                         }
                     }
                 } 
@@ -195,6 +198,7 @@ public class Router extends Device
                 if ((matchEntry = routeTable.lookup(ipacket.getDestinationAddress())) == null){
                     System.out.println("dropped packet due to no valid match found in routeTable");
                     icmpSend(TypeICMP.NET_UNREACH, etherPacket, ipacket, inIface);
+                    return;
                 }
 
                 int useAddr;
@@ -210,6 +214,7 @@ public class Router extends Device
                 if ((macMapping = arpCache.lookup(useAddr)) == null){
                     System.out.println("error: no arp mapping found");
                     icmpSend(TypeICMP.HOST_UNREACH, etherPacket, ipacket, inIface);
+                    return;
                 } 
                 
                 //set the MACs as necessary before sending
@@ -228,6 +233,24 @@ public class Router extends Device
         Ethernet ether = new Ethernet();
         IPv4 ip = new IPv4();
         ICMP icmp = new ICMP();
+
+        switch(type){
+            case NET_UNREACH:
+                System.out.println("icmp network unreachable");
+                break;
+            case HOST_UNREACH:
+                System.out.println("icmp host unreachable");
+                break;
+            case PORT_UNREACH:
+                System.out.println("icmp port unreachable");
+                break;
+            case TIME_EXCEDDED:
+                System.out.println("icmp time excedded");
+                break;
+            case ECHO_REPLY:
+                System.out.println("icmp echo reply");
+                break;
+        }
 
         ether.setPayload(ip);
         ip.setPayload(icmp);
@@ -252,6 +275,7 @@ public class Router extends Device
 
         RouteEntry ipMatch;
 
+        System.out.println("doing lookup on " + IPv4.fromIPv4Address(ip.getDestinationAddress()));
         if ((ipMatch = routeTable.lookup(ip.getDestinationAddress())) == null) {
             System.out.println("icmp route table failure\nsomething is very wrong");
             return;
@@ -260,7 +284,8 @@ public class Router extends Device
             ArpEntry arpMatch;
             
             if ((arpIp = ipMatch.getGatewayAddress()) == 0){
-               arpIp = ipMatch.getDestinationAddress(); 
+                System.out.println("icmp arp lookup using dest addr : " + IPv4.fromIPv4Address(ip.getDestinationAddress()));
+                arpIp = ip.getDestinationAddress(); 
             }
 
             if ((arpMatch = arpCache.lookup(arpIp)) == null){
@@ -276,6 +301,13 @@ public class Router extends Device
     }
 
     private byte[] buildICMPPayload(IPv4 ipacket){
+
+/*
+        im worried that serialize could cause an issue here
+        as long as checksum/length values arent set to 0 I think things should be ok though
+        since it says it only changes values if the above is true
+*/
+
         byte[] padding = new byte[4];
         byte[] ipHeader = ipacket.serialize();
         byte[] end = Arrays.copyOfRange(ipacket.getPayload().serialize(), 0, 8);
