@@ -23,24 +23,24 @@ public class Switch extends Device
         private static final int MAC_TBL_TIMEOUT = 15;
         private static final int TMOUT_FREQ = 1;
 
-        private ConcurrentHashMap macTable;
+        private ConcurrentHashMap<MACAddress,SwitchTblEntry> macTable;
 
         private Timer timer;
 
-        private void printTable(){
+/*         private void printTable(){
                 Map.Entry<MACAddress, SwitchTblEntry> map;
-                Iterator<Map.Entry> itr = macTable.entrySet().iterator();
+                Iterator<Map.Entry<MACAddress,SwitchTblEntry>> itr = macTable.entrySet().iterator();
                 System.out.println("Current MAC Table (MAC | Iface name | timeout)");
                 while(itr.hasNext()){
                     map = itr.next();
                     System.out.println(map.getKey().toString() + "\t| " + map.getValue().toString());
                 }
         }
-
+ */
         class TimeoutTask extends TimerTask {
             public void run(){
                 Map.Entry<MACAddress, SwitchTblEntry> map;
-                Iterator<Map.Entry> itr = macTable.entrySet().iterator();
+                Iterator<Map.Entry<MACAddress,SwitchTblEntry>> itr = macTable.entrySet().iterator();
                 while(itr.hasNext()){
                     map = itr.next();
                     if (map.getValue().getTimeout() == 0){
