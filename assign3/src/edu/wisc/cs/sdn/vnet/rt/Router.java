@@ -147,9 +147,15 @@ public class Router extends Device
                     ARP arp = (ARP)etherPacket.getPayload();
 
                     if (arp.getOpCode() == ARP.OP_REQUEST){
-                        // request case
+                        if (ByteBuffer.wrap(arp.getTargetProtocolAddress()).getInt() == inIface.getIpAddress()){
+                            sendArpReply(etherPacket, inIface);
+                            return;
+                        }
                     } else if (arp.getOpCode() == ARP.OP_REPLY){
-                        // replay case
+                    /*
+                        add entry to arp cache
+                        dequeue packets & populate MAC before sending
+                    */
                     }else{
                         System.out.println("dropped ARP packet due to bad opcode");
                         return;
@@ -177,7 +183,7 @@ public class Router extends Device
                 ipacket.setTtl((byte)(ipacket.getTtl() - 1));
                 if (ipacket.getTtl() <= 0){
                     System.out.println("dropped packet due to zero ttl");
-                    icmpSend(TypeICMP.TIME_EXCEDDED, etherPacket, ipacket, inIface);
+                    sendICMP(TypeICMP.TIME_EXCEDDED, etherPacket, ipacket, inIface);
                     return;
                 }
 
@@ -194,14 +200,15 @@ public class Router extends Device
                     if (iff.getIpAddress() == ipacket.getDestinationAddress()){
                         if (ipacket.getProtocol() == IPv4.PROTOCOL_ICMP){
                             if (((ICMP)ipacket.getPayload()).getIcmpType() == (byte)8){
-                                icmpSend(TypeICMP.ECHO_REPLY, etherPacket, ipacket, inIface);
+
+                                sendICMP(TypeICMP.ECHO_REPLY, etherPacket, ipacket, inIface);
                                 return;
                             }else{
                                 System.out.println("dropped ICMP packet matching interface (not echo request)");
                                 return;
                             }
                         }else{
-                            icmpSend(TypeICMP.PORT_UNREACH, etherPacket, ipacket, inIface);
+                            sendICMP(TypeICMP.PORT_UNREACH, etherPacket, ipacket, inIface);
                             return;
                         }
                     }
@@ -211,7 +218,7 @@ public class Router extends Device
                 RouteEntry matchEntry;
                 if ((matchEntry = routeTable.lookup(ipacket.getDestinationAddress())) == null){
                     System.out.println("dropped packet due to no valid match found in routeTable");
-                    icmpSend(TypeICMP.NET_UNREACH, etherPacket, ipacket, inIface);
+                    sendICMP(TypeICMP.NET_UNREACH, etherPacket, ipacket, inIface);
                     return;
                 }
 
@@ -227,7 +234,28 @@ public class Router extends Device
                 ArpEntry macMapping;
                 if ((macMapping = arpCache.lookup(useAddr)) == null){
                     System.out.println("error: no arp mapping found");
-                    icmpSend(TypeICMP.HOST_UNREACH, etherPacket, ipacket, inIface);
+/*
+                    for each unique ip queue the packet
+                        - each queue holds packets destined for a single ip (ie mac)
+                    after 3 failed arp requests drop all packets in that specific queue
+                        - resend the arp request every 1s that no response is obtained
+                        - after the 3 time failure create & send host unreachable ICMP
+
+                    1. on ARP cache lookup failure
+                        - check if a queue exists for the IP
+                            if yes add to existing queue
+                            if no create new queue for its IP
+                        - exit this location
+
+                    2. queue algo
+                        - seperate thread runs on each spawned queue
+                        - every 1s an ARP request is created 
+                            - on response send all packets in the queue
+                            - on failure (3 times) clear the queue (ie drop all packets)
+                                & send ICMP host unreachable
+
+*/
+                    sendICMP(TypeICMP.HOST_UNREACH, etherPacket, ipacket, inIface);
                     return;
                 } 
                 
@@ -242,7 +270,29 @@ public class Router extends Device
 		/********************************************************************/
 	}
 
-    public void icmpSend(TypeICMP type, Ethernet etherPacket, IPv4 ipacket, Iface inface){
+    private void sendArpReply(Ethernet arpRequest, Iface inIface){
+        ARP newArp = new ARP();
+        Ethernet newEther = new Ethernet(); 
+
+        newEther.setEtherType(Ethernet.TYPE_ARP);
+        newEther.setSourceMACAddress(inIface.getMacAddress().toBytes());
+        newEther.setDestinationMACAddress(arpRequest.getSourceMACAddress());
+
+        newArp.setHardwareType(ARP.HW_TYPE_ETHERNET);
+        newArp.setProtocolType(ARP.PROTO_TYPE_IP);
+        newArp.setHardwareAddressLength((byte)Ethernet.DATALAYER_ADDRESS_LENGTH);
+        newArp.setProtocolAddressLength((byte)4);
+        newArp.setOpCode(ARP.OP_REPLY);
+        newArp.setSenderHardwareAddress(inIface.getMacAddress().toBytes());
+        newArp.setSenderProtocolAddress(inIface.getIpAddress());
+        newArp.setTargetHardwareAddress(arpRequest.getSourceMACAddress());
+        newArp.setTargetProtocolAddress(((IPv4)arpRequest.getPayload()).getSourceAddress());
+
+        super.sendPacket(newEther, inIface);
+
+    }
+
+    private void sendICMP(TypeICMP type, Ethernet etherPacket, IPv4 ipacket, Iface inface){
 
         Ethernet ether = new Ethernet();
         IPv4 ip = new IPv4();
