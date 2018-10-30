@@ -209,11 +209,33 @@ public class Router extends Device
         if ((macMapping = arpCache.lookup(useAddr)) == null){
             System.out.println("error: no arp mapping found");
 /*
+            use hashtable of queues w/ IP as key
+            would need to be a synchronized hash map for the threading parts
+            options
+                - create a thread for each queue: it will send arp request every 1s until a replay is recieved
+                   will clear the queue after 3 failed send + 1s
+                   * bad: could be exploited since spamming unknown IPs will cause unlimited threads to be created
+                   * good: simple, better timing since each thread only has 1 timer/queue to worry about
+                - create a shared thread to keep track of the counts: each queue will have a count associated with i
+                    (ie how many ARp requests rounds it has been alive for), a central timer will send ARP requests for each
+                    alive queue every 1s until an ARP is recieved and its removed
+                    * good: only 1 thread, not many worries about race conditions and stuff
+                    * bad: complictaed to manage the timing; not as responsive per queue as they are all managed by 1 thread
+
+            dealing w/ response:
+                just remove the queue from main hashmap (so it will not be included in the maintenance loop anymore)
+                from there send all elements out in queue order 
+                options:
+                    - do it all right away; could be slow though
+                    - make a thread to do it in background & just exit; seems like a bad idea though 
+
             for each unique ip queue the packet
                 - each queue holds packets destined for a single ip (ie mac)
             after 3 failed arp requests drop all packets in that specific queue
                 - resend the arp request every 1s that no response is obtained
                 - after the 3 time failure create & send host unreachable ICMP
+
+
 
             1. on ARP cache lookup failure
                 - check if a queue exists for the IP
