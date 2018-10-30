@@ -8,6 +8,7 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Iterator;
 
+import net.floodlightcontroller.packet.ARP;
 import net.floodlightcontroller.packet.Data;
 import net.floodlightcontroller.packet.Ethernet;
 import net.floodlightcontroller.packet.ICMP;
@@ -141,7 +142,20 @@ public class Router extends Device
                 to drop packet just return w/o doing any send
 */   
 
-                if (etherPacket.getEtherType() != Ethernet.TYPE_IPv4){
+                if (etherPacket.getEtherType() == Ethernet.TYPE_ARP){
+                    
+                    ARP arp = (ARP)etherPacket.getPayload();
+
+                    if (arp.getOpCode() == ARP.OP_REQUEST){
+                        // request case
+                    } else if (arp.getOpCode() == ARP.OP_REPLY){
+                        // replay case
+                    }else{
+                        System.out.println("dropped ARP packet due to bad opcode");
+                        return;
+                    }
+
+                } else if (etherPacket.getEtherType() != Ethernet.TYPE_IPv4){
                     System.out.println("dropped packet due to type mismatch");
                     return;
                 }
