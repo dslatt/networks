@@ -114,160 +114,130 @@ public class Router extends Device
 	public void handlePacket(Ethernet etherPacket, Iface inIface)
 	{
 		System.out.println("*** -> Received packet: " +
-                etherPacket.toString().replace("\n", "\n\t"));
-		
-		/********************************************************************/
-		/* TODO: Handle packets                                             */
-/*
-                1 - if packet is not IPv4: drop it
-                2 - verify packet checksum
-                     - only compute over the IP header (read length of 'length' field)
-                     - must zero out the checksum field in header before computation
-                     - utilize serialize() from IPv4 class to compute
-                     - if incorrect drop the packet
-                3 - verify packet TTL (how many hops left?)
-                    - decrement existing TTL by 1
-                    - if resultsing TTL is 0 or less than drop packet
-                4 - check if packet if for one of router interfaces
-                    - use the interfaces list from superclass Device
-                    - if packets dest IP matches an interface, just drop the packet
-                5 - next step is to forward the packet according to table entries
-                    - use lookup from Router to get correct RouteEntry for dest IP
-                    - if no match just drop packet
-                6 - determine next hop IP and MAC
-                    - call lookup from ArpCache to get the next MAC (new dest MAC)
-                    - MAC of outgoing interface should be set as source MAC
-                7 - call sendPacket to send the packet 
+        etherPacket.toString().replace("\n", "\n\t"));
 
-                to drop packet just return w/o doing any send
-*/   
-
-                if (etherPacket.getEtherType() == Ethernet.TYPE_ARP){
+        if (etherPacket.getEtherType() == Ethernet.TYPE_ARP){
                     
-                    ARP arp = (ARP)etherPacket.getPayload();
+            ARP arp = (ARP)etherPacket.getPayload();
 
-                    if (arp.getOpCode() == ARP.OP_REQUEST){
-                        if (ByteBuffer.wrap(arp.getTargetProtocolAddress()).getInt() == inIface.getIpAddress()){
-                            sendArpReply(etherPacket, inIface);
-                            return;
-                        }
-                    } else if (arp.getOpCode() == ARP.OP_REPLY){
-                    /*
-                        add entry to arp cache
-                        dequeue packets & populate MAC before sending
-                    */
+            if (arp.getOpCode() == ARP.OP_REQUEST){
+                if (ByteBuffer.wrap(arp.getTargetProtocolAddress()).getInt() == inIface.getIpAddress()){
+                    sendArpReply(etherPacket, inIface);
+                    return;
+                }
+            } else if (arp.getOpCode() == ARP.OP_REPLY){
+            /*
+                add entry to arp cache
+                dequeue packets & populate MAC before sending
+            */
+            }else{
+                System.out.println("dropped ARP packet due to bad opcode");
+                return;
+            }
+
+        } else if (etherPacket.getEtherType() != Ethernet.TYPE_IPv4){
+            System.out.println("dropped packet due to type mismatch");
+            return;
+        }
+
+        IPv4 ipacket = (IPv4)etherPacket.getPayload();
+        short checksum = ipacket.getChecksum();
+
+        ipacket.resetChecksum();
+
+        // sets the checksum, headerLength, and totalLength fields
+        byte[] sipacket = ipacket.serialize();
+
+        // use the fresh calculated checksum from serialize                
+        if (ByteBuffer.wrap(sipacket).getShort(10) != checksum){
+            System.out.println("dropped packet due to bad checksum");
+            return;
+        }
+
+        ipacket.setTtl((byte)(ipacket.getTtl() - 1));
+        if (ipacket.getTtl() <= 0){
+            System.out.println("dropped packet due to zero ttl");
+            sendICMP(TypeICMP.TIME_EXCEDDED, etherPacket, ipacket, inIface);
+            return;
+        }
+
+        // need to compute new checksum after updating ttl
+        ipacket.resetChecksum();
+        ipacket.serialize();
+
+        // check router interfaces
+        Iterator<Iface> ifacesItr = super.getInterfaces() .values().iterator();
+        System.out.println("name\tip\tmac\n");
+        while(ifacesItr.hasNext()){
+            Iface iff = ifacesItr.next();
+            System.out.printf("%s\t%s\t%s\n", iff.getName(), IPv4.fromIPv4Address(iff.getIpAddress()), iff.getMacAddress().toString());
+            if (iff.getIpAddress() == ipacket.getDestinationAddress()){
+                if (ipacket.getProtocol() == IPv4.PROTOCOL_ICMP){
+                    if (((ICMP)ipacket.getPayload()).getIcmpType() == (byte)8){
+
+                        sendICMP(TypeICMP.ECHO_REPLY, etherPacket, ipacket, inIface);
+                        return;
                     }else{
-                        System.out.println("dropped ARP packet due to bad opcode");
+                        System.out.println("dropped ICMP packet matching interface (not echo request)");
                         return;
                     }
-
-                } else if (etherPacket.getEtherType() != Ethernet.TYPE_IPv4){
-                    System.out.println("dropped packet due to type mismatch");
+                }else{
+                    sendICMP(TypeICMP.PORT_UNREACH, etherPacket, ipacket, inIface);
                     return;
                 }
+            }
+        } 
 
-                IPv4 ipacket = (IPv4)etherPacket.getPayload();
-                short checksum = ipacket.getChecksum();
+        // lookup route table entry
+        RouteEntry matchEntry;
+        if ((matchEntry = routeTable.lookup(ipacket.getDestinationAddress())) == null){
+            System.out.println("dropped packet due to no valid match found in routeTable");
+            sendICMP(TypeICMP.NET_UNREACH, etherPacket, ipacket, inIface);
+            return;
+        }
 
-                ipacket.resetChecksum();
+        int useAddr;
 
-                // sets the checksum, headerLength, and totalLength fields
-                byte[] sipacket = ipacket.serialize();
+        // if gateway = 0 use destination, else use gateway
+        if ((useAddr = matchEntry.getGatewayAddress()) == 0){
+            System.out.println("using dest ip (gateway = 0)");
+            useAddr = ipacket.getDestinationAddress();
+        }
 
-                // use the fresh calculated checksum from serialize                
-                if (ByteBuffer.wrap(sipacket).getShort(10) != checksum){
-                    System.out.println("dropped packet due to bad checksum");
-                    return;
-                }
-
-                ipacket.setTtl((byte)(ipacket.getTtl() - 1));
-                if (ipacket.getTtl() <= 0){
-                    System.out.println("dropped packet due to zero ttl");
-                    sendICMP(TypeICMP.TIME_EXCEDDED, etherPacket, ipacket, inIface);
-                    return;
-                }
-
-                // need to compute new checksum after updating ttl
-                ipacket.resetChecksum();
-                ipacket.serialize();
-
-                // check router interfaces
-                Iterator<Iface> ifacesItr = super.getInterfaces() .values().iterator();
-                System.out.println("name\tip\tmac\n");
-                while(ifacesItr.hasNext()){
-                    Iface iff = ifacesItr.next();
-                    System.out.printf("%s\t%s\t%s\n", iff.getName(), IPv4.fromIPv4Address(iff.getIpAddress()), iff.getMacAddress().toString());
-                    if (iff.getIpAddress() == ipacket.getDestinationAddress()){
-                        if (ipacket.getProtocol() == IPv4.PROTOCOL_ICMP){
-                            if (((ICMP)ipacket.getPayload()).getIcmpType() == (byte)8){
-
-                                sendICMP(TypeICMP.ECHO_REPLY, etherPacket, ipacket, inIface);
-                                return;
-                            }else{
-                                System.out.println("dropped ICMP packet matching interface (not echo request)");
-                                return;
-                            }
-                        }else{
-                            sendICMP(TypeICMP.PORT_UNREACH, etherPacket, ipacket, inIface);
-                            return;
-                        }
-                    }
-                } 
-
-                // lookup route table entry
-                RouteEntry matchEntry;
-                if ((matchEntry = routeTable.lookup(ipacket.getDestinationAddress())) == null){
-                    System.out.println("dropped packet due to no valid match found in routeTable");
-                    sendICMP(TypeICMP.NET_UNREACH, etherPacket, ipacket, inIface);
-                    return;
-                }
-
-                int useAddr;
-
-                // if gateway = 0 use destination, else use gateway
-                if ((useAddr = matchEntry.getGatewayAddress()) == 0){
-                    System.out.println("using dest ip (gateway = 0)");
-                    useAddr = ipacket.getDestinationAddress();
-                }
-
-                // ARP lookup
-                ArpEntry macMapping;
-                if ((macMapping = arpCache.lookup(useAddr)) == null){
-                    System.out.println("error: no arp mapping found");
+        // ARP lookup
+        ArpEntry macMapping;
+        if ((macMapping = arpCache.lookup(useAddr)) == null){
+            System.out.println("error: no arp mapping found");
 /*
-                    for each unique ip queue the packet
-                        - each queue holds packets destined for a single ip (ie mac)
-                    after 3 failed arp requests drop all packets in that specific queue
-                        - resend the arp request every 1s that no response is obtained
-                        - after the 3 time failure create & send host unreachable ICMP
+            for each unique ip queue the packet
+                - each queue holds packets destined for a single ip (ie mac)
+            after 3 failed arp requests drop all packets in that specific queue
+                - resend the arp request every 1s that no response is obtained
+                - after the 3 time failure create & send host unreachable ICMP
 
-                    1. on ARP cache lookup failure
-                        - check if a queue exists for the IP
-                            if yes add to existing queue
-                            if no create new queue for its IP
-                        - exit this location
+            1. on ARP cache lookup failure
+                - check if a queue exists for the IP
+                    if yes add to existing queue
+                    if no create new queue for its IP
+                - exit this location
 
-                    2. queue algo
-                        - seperate thread runs on each spawned queue
-                        - every 1s an ARP request is created 
-                            - on response send all packets in the queue
-                            - on failure (3 times) clear the queue (ie drop all packets)
-                                & send ICMP host unreachable
+            2. queue algo
+                - seperate thread runs on each spawned queue
+                - every 1s an ARP request is created 
+                    - on response send all packets in the queue
+                    - on failure (3 times) clear the queue (ie drop all packets)
+                        & send ICMP host unreachable
 
 */
-                    sendICMP(TypeICMP.HOST_UNREACH, etherPacket, ipacket, inIface);
-                    return;
-                } 
+            sendICMP(TypeICMP.HOST_UNREACH, etherPacket, ipacket, inIface);
+            return;
+        } 
                 
-                //set the MACs as necessary before sending
-                etherPacket.setDestinationMACAddress(macMapping.getMac().toBytes()); 
-                etherPacket.setSourceMACAddress(matchEntry.getInterface().getMacAddress().toBytes());
+        //set the MACs as necessary before sending
+        etherPacket.setDestinationMACAddress(macMapping.getMac().toBytes()); 
+        etherPacket.setSourceMACAddress(matchEntry.getInterface().getMacAddress().toBytes());
 
-                super.sendPacket(etherPacket, matchEntry.getInterface());
-                
-                //printPacket(etherPacket);
-		
-		/********************************************************************/
+        super.sendPacket(etherPacket, matchEntry.getInterface());
 	}
 
     private void sendArpReply(Ethernet arpRequest, Iface inIface){
