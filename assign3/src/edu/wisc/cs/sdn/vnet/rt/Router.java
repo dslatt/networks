@@ -221,6 +221,9 @@ public class Router extends Device
         IPv4 ipacket = (IPv4)etherPacket.getPayload();
         int useAddr;
 
+
+        System.out.println("gateway: " + IPv4.fromIPv4Address(matchEntry.getGatewayAddress()));
+        System.out.println("dest: " + IPv4.fromIPv4Address(ipacket.getDestinationAddress()));
         // if gateway = 0 use destination, else use gateway
         if ((useAddr = matchEntry.getGatewayAddress()) == 0){
             System.out.println("using dest ip (gateway = 0)");
@@ -233,6 +236,7 @@ public class Router extends Device
              processErrors){
             System.out.println("error: no arp mapping found");
             arpController.requestAddress(etherPacket, matchEntry.getInterface());
+            //icmpController.sendPacket(ICMPType.HOST_UNREACH, etherPacket, inface); 
             return null;
         }
 

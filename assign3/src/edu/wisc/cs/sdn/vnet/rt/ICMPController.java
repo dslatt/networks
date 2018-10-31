@@ -79,7 +79,7 @@ public class ICMPController {
 
         if (type == ICMPType.ECHO_REPLY) {
             ip.setSourceAddress(ipacket.getDestinationAddress()); 
-            icmp.setPayload(ip.getPayload());
+            icmp.setPayload(((ICMP)ipacket.getPayload()).getPayload());
         }else{
             ip.setSourceAddress(inface.getIpAddress());
             icmp.setPayload(new Data(buildICMPPayload(ipacket)));
@@ -104,6 +104,9 @@ public class ICMPController {
             System.out.println("icmp arp lookup failed\nsomething is very wrong again");
             return;
         }
+
+        System.out.println("completed lookup giving: " + arpMatch.getMac().toString());
+
         ether.setDestinationMACAddress(arpMatch.getMac().toBytes());
 
         host.sendPacket(ether, inface);
