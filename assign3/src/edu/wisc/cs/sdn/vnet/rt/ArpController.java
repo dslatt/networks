@@ -214,7 +214,7 @@ public class ArpController {
             newEther.setDestinationMACAddress(arpRequest.getSourceMACAddress());
             newArp.setOpCode(ARP.OP_REPLY);
             newArp.setTargetHardwareAddress(arpRequest.getSourceMACAddress());
-            newArp.setTargetProtocolAddress(((IPv4)arpRequest.getPayload()).getSourceAddress());
+            newArp.setTargetProtocolAddress(((ARP)arpRequest.getPayload()).getSenderProtocolAddress());
         }else if (type == ArpPacketType.ARP_REQUEST){
             newEther.setDestinationMACAddress(MACAddress.valueOf("FF:FF:FF:FF:FF:FF").toBytes());
             newArp.setOpCode(ARP.OP_REQUEST);
