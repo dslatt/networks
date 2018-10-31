@@ -3,13 +3,11 @@ package edu.wisc.cs.sdn.vnet.rt;
 import edu.wisc.cs.sdn.vnet.Device;
 import edu.wisc.cs.sdn.vnet.DumpFile;
 import edu.wisc.cs.sdn.vnet.Iface;
+import edu.wisc.cs.sdn.vnet.rt.ICMPController.ICMPType;
 
 import java.nio.ByteBuffer;
-import java.util.Arrays;
 import java.util.Iterator;
 
-import net.floodlightcontroller.packet.ARP;
-import net.floodlightcontroller.packet.Data;
 import net.floodlightcontroller.packet.Ethernet;
 import net.floodlightcontroller.packet.ICMP;
 import net.floodlightcontroller.packet.IPv4;
@@ -18,38 +16,16 @@ import net.floodlightcontroller.packet.IPv4;
  * @author Aaron Gember-Jacobson and Anubhavnidhi Abhashkumar
  */
 
-enum TypeICMP {
-    TIME_EXCEDDED   (b(11), b(0)),
-    NET_UNREACH     (b(3), b(0)),
-    HOST_UNREACH    (b(3), b(1)),
-    PORT_UNREACH    (b(3), b(3)),
-    ECHO_REPLY      (b(0), b(0));
-
-    private final byte type;
-    private final byte code;
-
-    TypeICMP (byte type, byte code){
-        this.type = type;
-        this.code = code;
-    }
-
-    private static byte b(int b){
-        return (byte)b;
-    }
-
-    public byte type() { return type; }
-    public byte code() { return code; }
-}
-
 public class Router extends Device
 {	
 	/** Routing table for the router */
-	private RouteTable routeTable;
-	
-	/** ARP cache for the router */
-	private ArpCache arpCache;
+    private	RouteTable routeTable;
+    
+    /** Controls ARP cache & processes all ARP actions */
+    private ArpController arpController;
 
-    private static final byte MAX_TTL = 64;
+    /** Controls all ICMP generated */
+    ICMPController icmpController;
 
 	/**
 	 * Creates a router for a specific host.
@@ -58,8 +34,9 @@ public class Router extends Device
 	public Router(String host, DumpFile logfile)
 	{
 		super(host,logfile);
-		this.routeTable = new RouteTable();
-		this.arpCache = new ArpCache();
+        this.routeTable = new RouteTable();
+        this.arpController = new ArpController(this);
+        this.icmpController = new ICMPController(this);
 	}
 	
 	/**
@@ -86,25 +63,14 @@ public class Router extends Device
 		System.out.print(this.routeTable.toString());
 		System.out.println("-------------------------------------------------");
 	}
-	
+    
 	/**
 	 * Load a new ARP cache from a file.
 	 * @param arpCacheFile the name of the file containing the ARP cache
 	 */
-	public void loadArpCache(String arpCacheFile)
-	{
-		if (!arpCache.load(arpCacheFile))
-		{
-			System.err.println("Error setting up ARP cache from file "
-					+ arpCacheFile);
-			System.exit(1);
-		}
-		
-		System.out.println("Loaded static ARP cache");
-		System.out.println("----------------------------------");
-		System.out.print(this.arpCache.toString());
-		System.out.println("----------------------------------");
-	}
+    public void loadArpCache(String arpCacheFile) {
+        arpController.loadArpCache(arpCacheFile);
+    }
 
 	/**
 	 * Handle an Ethernet packet received on a specific interface.
@@ -117,24 +83,10 @@ public class Router extends Device
         etherPacket.toString().replace("\n", "\n\t"));
 
         if (etherPacket.getEtherType() == Ethernet.TYPE_ARP){
-                    
-            ARP arp = (ARP)etherPacket.getPayload();
-
-            if (arp.getOpCode() == ARP.OP_REQUEST){
-                if (ByteBuffer.wrap(arp.getTargetProtocolAddress()).getInt() == inIface.getIpAddress()){
-                    sendArpReply(etherPacket, inIface);
-                    return;
-                }
-            } else if (arp.getOpCode() == ARP.OP_REPLY){
-            /*
-                add entry to arp cache
-                dequeue packets & populate MAC before sending
-            */
-            }else{
+            if (!arpController.handleArpPacket(etherPacket, inIface)){
                 System.out.println("dropped ARP packet due to bad opcode");
-                return;
             }
-
+            return;
         } else if (etherPacket.getEtherType() != Ethernet.TYPE_IPv4){
             System.out.println("dropped packet due to type mismatch");
             return;
@@ -157,7 +109,7 @@ public class Router extends Device
         ipacket.setTtl((byte)(ipacket.getTtl() - 1));
         if (ipacket.getTtl() <= 0){
             System.out.println("dropped packet due to zero ttl");
-            sendICMP(TypeICMP.TIME_EXCEDDED, etherPacket, ipacket, inIface);
+            icmpController.sendPacket(ICMPType.TIME_EXCEDDED, etherPacket, inIface);
             return;
         }
 
@@ -174,40 +126,22 @@ public class Router extends Device
             if (iff.getIpAddress() == ipacket.getDestinationAddress()){
                 if (ipacket.getProtocol() == IPv4.PROTOCOL_ICMP){
                     if (((ICMP)ipacket.getPayload()).getIcmpType() == (byte)8){
-
-                        sendICMP(TypeICMP.ECHO_REPLY, etherPacket, ipacket, inIface);
+                        icmpController.sendPacket(ICMPType.ECHO_REPLY, etherPacket, inIface);
                         return;
                     }else{
                         System.out.println("dropped ICMP packet matching interface (not echo request)");
                         return;
                     }
                 }else{
-                    sendICMP(TypeICMP.PORT_UNREACH, etherPacket, ipacket, inIface);
+                    icmpController.sendPacket(ICMPType.PORT_UNREACH, etherPacket, inIface);
                     return;
                 }
             }
         } 
 
-        // lookup route table entry
-        RouteEntry matchEntry;
-        if ((matchEntry = routeTable.lookup(ipacket.getDestinationAddress())) == null){
-            System.out.println("dropped packet due to no valid match found in routeTable");
-            sendICMP(TypeICMP.NET_UNREACH, etherPacket, ipacket, inIface);
-            return;
-        }
+        RouteEntry matchEntry = performRouteLookup(ipacket.getDestinationAddress(), etherPacket, inIface, true);
 
-        int useAddr;
-
-        // if gateway = 0 use destination, else use gateway
-        if ((useAddr = matchEntry.getGatewayAddress()) == 0){
-            System.out.println("using dest ip (gateway = 0)");
-            useAddr = ipacket.getDestinationAddress();
-        }
-
-        // ARP lookup
-        ArpEntry macMapping;
-        if ((macMapping = arpCache.lookup(useAddr)) == null){
-            System.out.println("error: no arp mapping found");
+        ArpEntry macMapping = performArpLookup(etherPacket, matchEntry, true);
 /*
             use hashtable of queues w/ IP as key
             would need to be a synchronized hash map for the threading parts
@@ -251,132 +185,52 @@ public class Router extends Device
                         & send ICMP host unreachable
 
 */
-            sendICMP(TypeICMP.HOST_UNREACH, etherPacket, ipacket, inIface);
-            return;
-        } 
+            // sendICMP(TypeICMP.HOST_UNREACH, etherPacket, ipacket, inIface);
+            // return;
                 
         //set the MACs as necessary before sending
         etherPacket.setDestinationMACAddress(macMapping.getMac().toBytes()); 
         etherPacket.setSourceMACAddress(matchEntry.getInterface().getMacAddress().toBytes());
 
         super.sendPacket(etherPacket, matchEntry.getInterface());
-	}
+    }
 
-    private void sendArpReply(Ethernet arpRequest, Iface inIface){
-        ARP newArp = new ARP();
-        Ethernet newEther = new Ethernet(); 
+    public RouteEntry performRouteLookup(int ip, Ethernet etherPacket, Iface iface, boolean processErrors){
 
-        newEther.setEtherType(Ethernet.TYPE_ARP);
-        newEther.setSourceMACAddress(inIface.getMacAddress().toBytes());
-        newEther.setDestinationMACAddress(arpRequest.getSourceMACAddress());
-        newEther.setPayload(newArp);
+        // lookup route table entry
+        RouteEntry matchEntry;
+        if ((matchEntry = routeTable.lookup(ip)) == null &&
+             processErrors){
+            System.out.println("dropped packet due to no valid match found in routeTable");
+            icmpController.sendPacket(ICMPType.NET_UNREACH, etherPacket, iface);
+            return null;
+        }
 
-        newArp.setHardwareType(ARP.HW_TYPE_ETHERNET);
-        newArp.setProtocolType(ARP.PROTO_TYPE_IP);
-        newArp.setHardwareAddressLength((byte)Ethernet.DATALAYER_ADDRESS_LENGTH);
-        newArp.setProtocolAddressLength((byte)4);
-        newArp.setOpCode(ARP.OP_REPLY);
-        newArp.setSenderHardwareAddress(inIface.getMacAddress().toBytes());
-        newArp.setSenderProtocolAddress(inIface.getIpAddress());
-        newArp.setTargetHardwareAddress(arpRequest.getSourceMACAddress());
-        newArp.setTargetProtocolAddress(((IPv4)arpRequest.getPayload()).getSourceAddress());
-
-        super.sendPacket(newEther, inIface);
+        return matchEntry;
 
     }
 
-    private void sendICMP(TypeICMP type, Ethernet etherPacket, IPv4 ipacket, Iface inface){
+    public ArpEntry performArpLookup(Ethernet etherPacket, RouteEntry matchEntry, boolean processErrors){
 
-        Ethernet ether = new Ethernet();
-        IPv4 ip = new IPv4();
-        ICMP icmp = new ICMP();
+        IPv4 ipacket = (IPv4)etherPacket.getPayload();
+        int useAddr;
 
-        switch(type){
-            case NET_UNREACH:
-                System.out.println("icmp network unreachable");
-                break;
-            case HOST_UNREACH:
-                System.out.println("icmp host unreachable");
-                break;
-            case PORT_UNREACH:
-                System.out.println("icmp port unreachable");
-                break;
-            case TIME_EXCEDDED:
-                System.out.println("icmp time excedded");
-                break;
-            case ECHO_REPLY:
-                System.out.println("icmp echo reply");
-                break;
+        // if gateway = 0 use destination, else use gateway
+        if ((useAddr = matchEntry.getGatewayAddress()) == 0){
+            System.out.println("using dest ip (gateway = 0)");
+            useAddr = ipacket.getDestinationAddress();
         }
 
-        ether.setPayload(ip);
-        ip.setPayload(icmp);
-
-        icmp.setIcmpType(type.type());
-        icmp.setIcmpCode(type.code());
-
-        ip.setTtl(MAX_TTL);
-        ip.setProtocol(IPv4.PROTOCOL_ICMP);
-        ip.setDestinationAddress(ipacket.getSourceAddress());
-
-        if (type == TypeICMP.ECHO_REPLY) {
-            ip.setSourceAddress(ipacket.getDestinationAddress()); 
-            icmp.setPayload(ip.getPayload());
-        }else{
-            ip.setSourceAddress(inface.getIpAddress());
-            icmp.setPayload(new Data(buildICMPPayload(ipacket)));
+        // ARP lookup
+        ArpEntry macMapping;
+        if ((macMapping = arpController.lookupFromCache(useAddr)) == null &&
+             processErrors){
+            System.out.println("error: no arp mapping found");
+            arpController.requestAddress(etherPacket, matchEntry.getInterface());
+            return null;
         }
 
-        ether.setEtherType(Ethernet.TYPE_IPv4);
-        ether.setSourceMACAddress(inface.getMacAddress().toBytes());
-
-        RouteEntry ipMatch;
-
-        System.out.println("doing lookup on " + IPv4.fromIPv4Address(ip.getDestinationAddress()));
-        if ((ipMatch = routeTable.lookup(ip.getDestinationAddress())) == null) {
-            System.out.println("icmp route table failure\nsomething is very wrong");
-            return;
-        }else{
-            int arpIp;
-            ArpEntry arpMatch;
-            
-            if ((arpIp = ipMatch.getGatewayAddress()) == 0){
-                System.out.println("icmp arp lookup using dest addr : " + IPv4.fromIPv4Address(ip.getDestinationAddress()));
-                arpIp = ip.getDestinationAddress(); 
-            }
-
-            if ((arpMatch = arpCache.lookup(arpIp)) == null){
-                System.out.println("icmp arp lookup failed\nsomething is very wrong again");
-                return;
-            }else{
-                ether.setDestinationMACAddress(arpMatch.getMac().toBytes());
-            }
-        }
-
-        super.sendPacket(ether, inface);
-
-    }
-
-    private byte[] buildICMPPayload(IPv4 ipacket){
-
-/*
-        im worried that serialize could cause an issue here
-        as long as checksum/length values arent set to 0 I think things should be ok though
-        since it says it only changes values if the above is true
-*/
-
-        byte[] padding = new byte[4];
-        byte[] ipHeader = ipacket.serialize();
-        byte[] end = Arrays.copyOfRange(ipacket.getPayload().serialize(), 0, 8);
-
-        byte[] payload = new byte[ipHeader.length + padding.length + end.length];
-
-        System.arraycopy(padding, 0, payload, 0, padding.length);
-        System.arraycopy(ipHeader, 0, payload, padding.length, ipHeader.length);
-        System.arraycopy(end, 0, payload, padding.length + ipHeader.length, end.length);
-
-        return payload;
-
+        return macMapping;
     }
 
     public static void printPacket(Ethernet packet){
