@@ -92,7 +92,7 @@ public class ArpController {
         requestTimer.scheduleAtFixedRate(new ArpRequestTimer(), 0, 1000);
     } 
 
-    public void requestAddress(Ethernet packet, Iface iface){
+    public void requestAddress(int ipin, Ethernet packet, Iface iface){
 
         /*
             if arpQueues contains a key = 'ip' then:
@@ -105,12 +105,12 @@ public class ArpController {
         synchronized(this.arpQueues){
 
             IPv4 ip = (IPv4)packet.getPayload();
-            ArpPendingQueue arpQueue = arpQueues.get(ip.getDestinationAddress()); 
+            ArpPendingQueue arpQueue = arpQueues.get(ipin); 
 
             if (arpQueue != null){
                 arpQueue.enqueue(packet);
             }else{
-                arpQueues.put(ip.getDestinationAddress(), new ArpPendingQueue(packet, iface));
+                arpQueues.put(ipin, new ArpPendingQueue(packet, iface));
             }
 
         }
@@ -120,17 +120,25 @@ public class ArpController {
 
         ARP arp = (ARP)etherPacket.getPayload();
 
+        System.out.println("inFace IP: " + IPv4.fromIPv4Address(inIface.getIpAddress()));
+        System.out.println("ARP IP: " + IPv4.fromIPv4Address(IPv4.toIPv4Address(arp.getTargetProtocolAddress())));
+
+
         if (arp.getOpCode() == ARP.OP_REQUEST &&
         IPv4.toIPv4Address(arp.getTargetProtocolAddress()) == inIface.getIpAddress()){
+            System.out.println("handling ARP request (ie send a reply)");
             handleRequest(etherPacket, inIface, arp);
         } else if (arp.getOpCode() == ARP.OP_REPLY){
+            System.out.println("handling ARP reply (from a request?)");
             handleReply(IPv4.toIPv4Address(arp.getSenderProtocolAddress()),
                         arp.getSenderHardwareAddress(),
                         inIface);
 
         }else{
+            System.out.println("return false");
             return false;
         }
+        System.out.println("return true");
         return true;
     }
 
@@ -218,7 +226,7 @@ public class ArpController {
         }else if (type == ArpPacketType.ARP_REQUEST){
             newEther.setDestinationMACAddress(MACAddress.valueOf("FF:FF:FF:FF:FF:FF").toBytes());
             newArp.setOpCode(ARP.OP_REQUEST);
-            newArp.setTargetHardwareAddress(new byte[1]);  // NOTE: default byte value is 0, still not 100% sure this does what I want though
+            newArp.setTargetHardwareAddress(MACAddress.valueOf(0).toBytes());  // NOTE: default byte value is 0, still not 100% sure this does what I want though
             newArp.setTargetProtocolAddress(ip);
         }
 

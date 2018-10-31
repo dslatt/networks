@@ -235,7 +235,7 @@ public class Router extends Device
         if ((macMapping = arpController.lookupFromCache(useAddr)) == null &&
              processErrors){
             System.out.println("error: no arp mapping found");
-            arpController.requestAddress(etherPacket, matchEntry.getInterface());
+            arpController.requestAddress(useAddr, etherPacket, matchEntry.getInterface());
             //icmpController.sendPacket(ICMPType.HOST_UNREACH, etherPacket, inface); 
             return null;
         }
