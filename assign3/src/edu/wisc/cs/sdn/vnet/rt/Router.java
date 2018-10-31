@@ -139,9 +139,15 @@ public class Router extends Device
             }
         } 
 
-        RouteEntry matchEntry = performRouteLookup(ipacket.getDestinationAddress(), etherPacket, inIface, true);
+        RouteEntry matchEntry;
+        ArpEntry macMapping;
+        if ((matchEntry = performRouteLookup(ipacket.getDestinationAddress(), etherPacket, inIface, true)) == null){
+            return;
+        }
 
-        ArpEntry macMapping = performArpLookup(etherPacket, matchEntry, true);
+        if ((macMapping = performArpLookup(etherPacket, matchEntry, true)) == null) {
+            return;
+        }
 /*
             use hashtable of queues w/ IP as key
             would need to be a synchronized hash map for the threading parts
