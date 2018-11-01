@@ -8,12 +8,17 @@ import net.floodlightcontroller.packet.Ethernet;
 import net.floodlightcontroller.packet.ICMP;
 import net.floodlightcontroller.packet.IPv4;
 
+
 public class ICMPController {
 
     private static final byte MAX_TTL = 64;
 
+    /** Host router */
     private Router host;
 
+    /**
+     * ICMP error type
+     */
     public enum ICMPType {
         TIME_EXCEDDED   (b(11), b(0)),
         NET_UNREACH     (b(3), b(0)),
@@ -37,10 +42,20 @@ public class ICMPController {
         public byte code() { return code; }
     }
 
+    /**
+     * Create an ICMP controller for a given host router 
+     * @param host
+     */
     public ICMPController(Router host){
         this.host = host;
     }
 
+    /**
+     * Send an ICMP control packet on given interface
+     * @param type
+     * @param etherPacket
+     * @param inface
+     */
     public void sendPacket(ICMPType type, Ethernet etherPacket, Iface inface){
 
         Ethernet ether = new Ethernet();
@@ -112,6 +127,11 @@ public class ICMPController {
         host.sendPacket(ether, inface);
     }
 
+    /**
+     * Build the payload for an ICMP packet
+     * @param ipacket
+     * @return
+     */
     private byte[] buildICMPPayload(IPv4 ipacket){
 
 /*

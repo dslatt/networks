@@ -18,17 +18,20 @@ public class ArpController {
         ARP_REQUEST
     }
 
-    // HashMap containg all living ArpQueues
-    // key = ip, value = queued packets waiting on ARP(ip) request
+    /** Map from ip to queue of packets pending on ARP(ip)  */
     private ConcurrentHashMap<Integer, ArpPendingQueue> arpQueues;
 
+    /** ARP cache holding ip->MAC entries */
     private ArpCache arpCache;
 
     private Timer requestTimer;
 
-    // reference to the host router used to send packets
+    /** Host router */
     private Router host;
 
+    /**
+     * Periodic task run to send ARP requests for pending packets 
+     */
     class ArpRequestTimer extends TimerTask {
         public void run(){
         /* 
@@ -77,6 +80,10 @@ public class ArpController {
         }
     }
 
+    /**
+     * Create a ARP controller for a given router
+     * @param host
+     */
     public ArpController(Router host){
 
         /*
@@ -92,6 +99,12 @@ public class ArpController {
         requestTimer.scheduleAtFixedRate(new ArpRequestTimer(), 0, 1000);
     } 
 
+    /**
+     * Use ARP to descover the MAC Address for a given IP 
+     * @param ipin
+     * @param packet
+     * @param iface
+     */
     public void requestAddress(int ipin, Ethernet packet, Iface iface){
 
         /*
@@ -116,6 +129,12 @@ public class ArpController {
         }
     } 
 
+    /**
+     * Process an incoming ARP packet (Request or Reply)
+     * @param etherPacket
+     * @param inIface
+     * @return If the packet was able to be processed correctly
+     */
     public boolean handleArpPacket(Ethernet etherPacket, Iface inIface){
 
         ARP arp = (ARP)etherPacket.getPayload();
@@ -142,12 +161,22 @@ public class ArpController {
         return true;
     }
 
+    /**
+     * Insert an entry into the ARP cache
+     * @param mac
+     * @param ip
+     */
     public void insertIntoCache(MACAddress mac, int ip){
         synchronized(this.arpCache) {
             arpCache.insert(mac, ip);
         }
     }
 
+    /**
+     * Lookup an entry in the ARP cache
+     * @param ip
+     * @return Entry from ArpCache or null if failed 
+     */
     public ArpEntry lookupFromCache(int ip){
         synchronized(this.arpCache) {
             return arpCache.lookup(ip);
@@ -173,6 +202,12 @@ public class ArpController {
 		System.out.println("----------------------------------");
     }
 
+    /**
+     * Handle an ARP reply
+     * @param arpIp
+     * @param arpMac
+     * @param replyIface
+     */
     private void handleReply(int arpIp, byte[] arpMac, Iface replyIface){
         /*
             find the correct queue in arpQueues & remove from the HashMap
@@ -209,11 +244,24 @@ public class ArpController {
         }
     }
 
+    /**
+     * Handle an ARP request
+     * @param etherPacket
+     * @param iface
+     * @param arp
+     */
     private void handleRequest(Ethernet etherPacket, Iface iface, ARP arp){
         host.sendPacket(createArpPacket(etherPacket, iface, ArpPacketType.ARP_REPLY, 0), iface);
     }
 
-    /* there is a better way to define this function, Ill figure it out later */
+    /**
+     * Create an formatted ARP packet
+     * @param arpRequest
+     * @param iface
+     * @param type
+     * @param ip
+     * @return The completed ARP packet
+     */
     private Ethernet createArpPacket(Ethernet arpRequest, Iface iface, ArpPacketType type, int ip){
         ARP newArp = new ARP();
         Ethernet newEther = new Ethernet(); 
