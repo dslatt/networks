@@ -21,6 +21,11 @@ public class RouteEntry
 	/** Router interface out which packets should be sent to reach
 	 * the destination or gateway */
 	private Iface iface;
+
+	// RIP Additions
+	private Timer timer;
+	private RouteTable parent;
+	private int metric;
 	
 	/**
 	 * Create a new route table entry.
@@ -38,6 +43,54 @@ public class RouteEntry
 		this.maskAddress = maskAddress;
 		this.iface = iface;
 	}
+
+	// RIP Additions *********************
+	public RouteTable getParent() {
+		return this.parent; 
+	}
+
+	public void setParent(RouteTable rt) {
+		this.parent = rt; 
+	}
+
+	public Timer getTimer() {
+		return this.timer; 
+	}
+
+	public void setTimer(Timer t) {
+		this.timer = t; 
+	}
+
+	public int getMetric() {
+		return this.metric; 
+	}
+
+	public void setMetric(int m) {
+		this.metric = m; 
+	}
+
+	public void startTimer() {
+		this.timer = new Timer();
+		this.timer.schedule(new clearTimer(), 30000); 
+	}
+
+	public void restartTimer() {
+		this.timer.cancel();
+		this.timer.purge();
+		startTimer(); 
+	}
+
+	class clearTimer extends TimerTask {
+		public void run() {
+			removeFromParent(); 
+		}
+	}
+
+	public void removeFromParent() {
+		parent.remove(this.getDestinationAddress(), this.getMaskAddress()); 
+	}
+
+
 	
 	/**
 	 * @return destination IP address
@@ -68,7 +121,7 @@ public class RouteEntry
 	{ return this.iface; }
 
     public void setInterface(Iface iface)
-    { this.iface = iface; }
+	{ this.iface = iface; }
 	
 	public String toString()
 	{

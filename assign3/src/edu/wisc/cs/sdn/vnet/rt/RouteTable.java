@@ -28,6 +28,10 @@ public class RouteTable
 	 */
 	public RouteTable()
 	{ this.entries = new LinkedList<RouteEntry>(); }
+
+	public List<RouteEntry> getEntries() {
+		return entries; 
+	}
 	
 	/**
 	 * Lookup the route entry that matches a given IP address.
@@ -180,9 +184,25 @@ public class RouteTable
 	public void insert(int dstIp, int gwIp, int maskIp, Iface iface)
 	{
 		RouteEntry entry = new RouteEntry(dstIp, gwIp, maskIp, iface);
+
         synchronized(this.entries)
         { 
             this.entries.add(entry);
+        }
+	}
+
+	public void insert(int dstIp, int gwIp, int maskIp, Iface iface, int metric)
+	{
+		RouteEntry entry = new RouteEntry(dstIp, gwIp, maskIp, iface);
+		entry.setMetric(1); 
+		entry.setParent(this); 
+
+        synchronized(this.entries)
+        { 
+			this.entries.add(entry);
+			if (gwIP != 0) {
+				entry.startTimer(); 
+			}
         }
 	}
 	
@@ -222,6 +242,24 @@ public class RouteTable
             { return false; }
             entry.setGatewayAddress(gwIp);
             entry.setInterface(iface);
+        }
+        return true;
+	}
+
+	public boolean update(int dstIp, int maskIp, int gwIp, 
+            Iface iface, int metric)
+	{
+        synchronized(this.entries)
+        {
+            RouteEntry entry = this.find(dstIp, maskIp);
+            if (null == entry)
+			{ return false; }
+			if (gwIP != 0) {
+				entry.restartTimer(); 
+			}
+            entry.setGatewayAddress(gwIp);
+			entry.setInterface(iface);
+			entry.setMetric(metric); 
         }
         return true;
 	}

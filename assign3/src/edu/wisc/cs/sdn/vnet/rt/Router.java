@@ -27,6 +27,9 @@ public class Router extends Device
     /** Controls all ICMP generated */
     ICMPController icmpController;
 
+    // RIP Timer
+    private Timer ripTimer; 
+
 	/**
 	 * Creates a router for a specific host.
 	 * @param host hostname for the router
@@ -92,6 +95,9 @@ public class Router extends Device
             return;
         }
 
+        // We are dealing with an IP packet
+
+
         IPv4 ipacket = (IPv4)etherPacket.getPayload();
         short checksum = ipacket.getChecksum();
 
@@ -132,7 +138,15 @@ public class Router extends Device
                         System.out.println("dropped ICMP packet matching interface (not echo request)");
                         return;
                     }
-                }else{
+                } else if (ipacket.getProtocol() == IPv4.PROTOCOL_UDP) {
+                    UDP udp_packet = (UDP)ipacket.getPayload(); 
+                    if (udp_packet.getDestinationPort() == UDP.RIP_PORT) {
+                        handleRIPPacket(etherPacket, inIface); 
+                    } else {
+                        // Don't know what to do here yet
+                    }
+                }
+                else{
                     icmpController.sendPacket(ICMPType.PORT_UNREACH, etherPacket, inIface);
                     return;
                 }
@@ -155,6 +169,158 @@ public class Router extends Device
 
         super.sendPacket(etherPacket, matchEntry.getInterface());
     }
+
+    // RIP OPERATION *************************************************************************************************************
+    public void runRIP()
+	{
+		for (Iface interface : this.getInterfaces().values())
+		{
+			int mask = interface.getSubnetMask();
+			int destination = interface.getIpAddress() & mask;
+			
+			this.routeTable.insert(destination, 0, mask, ifaces, 1);
+		}
+		System.out.println(this.routeTable.toString()); // DEBUGGING Remove later
+        
+        // Send RIP requests 
+		for (Iface interface : this.interfaces.values())
+		{
+			this.sendRip(interface, true, true);
+		}
+        
+        // Every 10 seconds send out the unsolicited RIP response
+		this.ripTimer = new Timer();
+		this.ripTimer.scheduleAtFixedRate(new updateRIP(), 10000, 10000);
+	}
+	
+
+	private void handleRip(Ethernet etherPacket, Iface inIface)
+	{
+		if (etherPacket.getEtherType() != Ethernet.TYPE_IPv4) { return; }
+        
+        IPv4 ip_packet = (IPv4)etherPacket.getPayload();
+		if (ip_packet.getProtocol() != IPv4.PROTOCOL_UDP) { return; }
+        
+        UDP udp_packet= (UDP)ip_packet.getPayload();
+
+		short origCksum = UdpData.getChecksum();
+		UdpData.resetChecksum();
+		byte[] serialized = UdpData.serialize();
+		UdpData.deserialize(serialized, 0, serialized.length);
+		short calcCksum = UdpData.getChecksum();
+        if (origCksum != calcCksum) { return; }
+        
+
+		// Ensure this is on the RIP port
+		if (UdpData.getDestinationPort() != UDP.RIP_PORT) { return; }
+		
+		RIPv2 rip = (RIPv2)UdpData.getPayload();
+		if (rip.getCommand() == RIPv2.COMMAND_REQUEST)
+		{
+            if (etherPacket.getDestinationMAC().toLong() == MACAddress.valueOf("FF:FF:FF:FF:FF:FF").toLong() 
+                && ip.getDestinationAddress() == IPv4.toIPv4Address("224.0.0.9")) {
+				this.sendRip(inIface, true, false);
+				return;
+			}
+		}
+
+		boolean updated = false;
+		
+		for (RIPv2Entry ripEntry : rip.getEntries())
+		{
+			int address = ripEntry.getAddress();
+            int mask = ripEntry.getSubnetMask();
+            
+            int metric = ripEntry.getMetric() + 1;
+            ripEntry.setMetric(metric);
+            
+			int next = ripEntry.getNextHopAddress();
+
+			RouteEntry entry = this.routeTable.lookup(address);
+
+			if (entry == null || entry.getCost() > cost) {
+				this.routeTable.insert(address, next, mask, inIface, cost);
+				for (Iface ifaces : this.interfaces.values())
+				{
+					this.sendRip(inIface, false, false);
+				}
+			}
+		}
+	}
+	
+
+	public void sendRIPPacket(Iface inIface, boolean broadcast, boolean isRequest)
+	{
+        // Create all the packet types
+		Ethernet ether = new Ethernet();
+		IPv4 ip = new IPv4();
+		UDP udpPacket = new UDP();
+        RIPv2 ripPacket = new RIPv2();
+        
+        // Encapsulate the packets
+		ether.setPayload(ip);
+		ip.setPayload(udpPacket);
+		udpPacket.setPayload(ripPacket);
+        
+        // Configure the Ethernet packet
+		ether.setEtherType(Ethernet.TYPE_IPv4);
+		ether.setSourceMACAddress("FF:FF:FF:FF:FF:FF");
+		if(broadcast)
+			ether.setDestinationMACAddress("FF:FF:FF:FF:FF:FF");
+		else
+			ether.setDestinationMACAddress(inIface.getMacAddress().toBytes());
+        
+        // Configure the ip packet
+		ip.setTtl((byte)64);
+		ip.setVersion((byte)4);
+		ip.setProtocol(IPv4.PROTOCOL_UDP);
+		if(broadcast) {
+            ip.setDestinationAddress("224.0.0.9");
+        } else {
+            ip.setDestinationAddress(inIface.getIpAddress());
+        }
+        
+        // Configure the udp packet
+		udpPacket.setSourcePort(UDP.RIP_PORT);
+        udpPacket.setDestinationPort(UDP.RIP_PORT);
+        
+
+		// Configure the rip packet
+		ripPacket.setCommand(isRequest ? RIPv2.COMMAND_REQUEST : RIPv2.COMMAND_RESPONSE);
+
+		for (RouteEntry entry : this.routeTable.getEntries())
+		{
+			int address = entry.getDestinationAddress();
+			int mask = entry.getMaskAddress();
+			int next = inIface.getIpAddress();
+			int metric = entry.getMetric();
+			
+			RIPv2Entry ripEntry = new RIPv2Entry(address, mask, metric);
+            ripEntry.setNextHopAddress(next);
+            
+			ripPacket.addEntry(ripEntry);
+		}
+		
+		ether.serialize();
+		this.sendPacket(ether, inIface);
+		return;
+	}
+    
+    class updateRIP extends TimerTask {
+		public void run() {
+			timedResponse();
+		}
+    }
+
+    public void timedResponse() {
+		for (Iface interface : this.interfaces.values())
+		{
+			this.sendRip(iface, true, false);
+		}
+		return;
+	}
+    // RIP OPERATION *************************************************************************************************************
+
 
     /**
      * Perform a route table lookup on a given ip
