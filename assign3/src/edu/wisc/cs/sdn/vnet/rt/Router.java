@@ -11,6 +11,10 @@ import java.util.Iterator;
 import net.floodlightcontroller.packet.Ethernet;
 import net.floodlightcontroller.packet.ICMP;
 import net.floodlightcontroller.packet.IPv4;
+import net.floodlightcontroller.packet.*;
+
+import java.util.Timer; 
+import java.util.TimerTask; 
 
 /**
  * @author Aaron Gember-Jacobson and Anubhavnidhi Abhashkumar
@@ -173,19 +177,21 @@ public class Router extends Device
     // RIP OPERATION *************************************************************************************************************
     public void runRIP()
 	{
-		for (Iface interface : this.getInterfaces().values())
+        System.out.println("Starting RIP");
+
+		for (Iface interf : this.getInterfaces().values())
 		{
-			int mask = interface.getSubnetMask();
-			int destination = interface.getIpAddress() & mask;
+			int mask = interf.getSubnetMask();
+			int destination = interf.getIpAddress() & mask;
 			
-			this.routeTable.insert(destination, 0, mask, ifaces, 1);
+			this.routeTable.insert(destination, 0, mask, interf, 1);
 		}
 		System.out.println(this.routeTable.toString()); // DEBUGGING Remove later
         
         // Send RIP requests 
-		for (Iface interface : this.interfaces.values())
+		for (Iface interf : this.interfaces.values())
 		{
-			this.sendRip(interface, true, true);
+			this.sendRIPPacket(interf, true, true);
 		}
         
         // Every 10 seconds send out the unsolicited RIP response
@@ -194,7 +200,7 @@ public class Router extends Device
 	}
 	
 
-	private void handleRip(Ethernet etherPacket, Iface inIface)
+	private void handleRIPPacket(Ethernet etherPacket, Iface inIface)
 	{
 		if (etherPacket.getEtherType() != Ethernet.TYPE_IPv4) { return; }
         
@@ -203,23 +209,23 @@ public class Router extends Device
         
         UDP udp_packet= (UDP)ip_packet.getPayload();
 
-		short origCksum = UdpData.getChecksum();
-		UdpData.resetChecksum();
-		byte[] serialized = UdpData.serialize();
-		UdpData.deserialize(serialized, 0, serialized.length);
-		short calcCksum = UdpData.getChecksum();
+		short origCksum = udp_packet.getChecksum();
+		udp_packet.resetChecksum();
+		byte[] serialized = udp_packet.serialize();
+		udp_packet.deserialize(serialized, 0, serialized.length);
+		short calcCksum = udp_packet.getChecksum();
         if (origCksum != calcCksum) { return; }
         
 
 		// Ensure this is on the RIP port
-		if (UdpData.getDestinationPort() != UDP.RIP_PORT) { return; }
+		if (udp_packet.getDestinationPort() != UDP.RIP_PORT) { return; }
 		
-		RIPv2 rip = (RIPv2)UdpData.getPayload();
+		RIPv2 rip = (RIPv2)udp_packet.getPayload();
 		if (rip.getCommand() == RIPv2.COMMAND_REQUEST)
 		{
             if (etherPacket.getDestinationMAC().toLong() == MACAddress.valueOf("FF:FF:FF:FF:FF:FF").toLong() 
-                && ip.getDestinationAddress() == IPv4.toIPv4Address("224.0.0.9")) {
-				this.sendRip(inIface, true, false);
+                && ip_packet.getDestinationAddress() == IPv4.toIPv4Address("224.0.0.9")) {
+				this.sendRIPPacket(inIface, true, false);
 				return;
 			}
 		}
@@ -238,11 +244,11 @@ public class Router extends Device
 
 			RouteEntry entry = this.routeTable.lookup(address);
 
-			if (entry == null || entry.getCost() > cost) {
-				this.routeTable.insert(address, next, mask, inIface, cost);
+			if (entry == null || entry.getMetric() > metric) {
+				this.routeTable.insert(address, next, mask, inIface, metric);
 				for (Iface ifaces : this.interfaces.values())
 				{
-					this.sendRip(inIface, false, false);
+					this.sendRIPPacket(inIface, false, false);
 				}
 			}
 		}
@@ -313,9 +319,9 @@ public class Router extends Device
     }
 
     public void timedResponse() {
-		for (Iface interface : this.interfaces.values())
+		for (Iface interf : this.interfaces.values())
 		{
-			this.sendRip(iface, true, false);
+			this.sendRIPPacket(interf, true, false);
 		}
 		return;
 	}

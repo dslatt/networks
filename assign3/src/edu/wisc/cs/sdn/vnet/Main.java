@@ -89,6 +89,7 @@ public class Main
 			if (routeTableFile != null) { 
 				((Router)dev).loadRouteTable(routeTableFile);
 			} else {
+				System.out.println("About to run rip");
 				((Router)dev).runRIP();
 			}
 			

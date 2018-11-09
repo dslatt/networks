@@ -200,7 +200,7 @@ public class RouteTable
         synchronized(this.entries)
         { 
 			this.entries.add(entry);
-			if (gwIP != 0) {
+			if (gwIp != 0) {
 				entry.startTimer(); 
 			}
         }
@@ -254,7 +254,7 @@ public class RouteTable
             RouteEntry entry = this.find(dstIp, maskIp);
             if (null == entry)
 			{ return false; }
-			if (gwIP != 0) {
+			if (gwIp != 0) {
 				entry.restartTimer(); 
 			}
             entry.setGatewayAddress(gwIp);
