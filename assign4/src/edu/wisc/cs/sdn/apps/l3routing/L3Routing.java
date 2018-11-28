@@ -3,15 +3,22 @@ package edu.wisc.cs.sdn.apps.l3routing;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.openflow.protocol.OFMatch;
+import org.openflow.protocol.action.OFAction;
+import org.openflow.protocol.action.OFActionOutput;
+import org.openflow.protocol.instruction.OFInstruction;
+import org.openflow.protocol.instruction.OFInstructionApplyActions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import edu.wisc.cs.sdn.apps.util.Host;
-
+import edu.wisc.cs.sdn.apps.util.SwitchCommands;
 import net.floodlightcontroller.core.IFloodlightProviderService;
 import net.floodlightcontroller.core.IOFSwitch;
 import net.floodlightcontroller.core.IOFSwitch.PortChangeType;
@@ -85,8 +92,157 @@ public class L3Routing implements IFloodlightModule, IOFSwitchListener,
 		/*********************************************************************/
 		/* TODO: Initialize variables or perform startup tasks, if necessary */
 		
+		// Shouldn't have to do anything here
+
+		/* Initialize the solution matrix as the same as already known links */
+
+		
 		/*********************************************************************/
 	}
+	
+	private OFMatch createMatchObject(Host host) {
+		OFMatch match = new OFMatch();
+		match.setDataLayerType(OFMatch.ETH_TYPE_IPV4);
+		match.setNetworkDestination(host.getIPv4Address());
+		return match;
+	}
+	
+	private void installEntries(Host host) {
+		// Ensure that the host is attached to a switch
+		if (!host.isAttachedToSwitch()) {
+			return; 
+		}
+		
+		Map<Long, Integer> next_hops = findShortestPaths(host.getSwitch()); 
+		OFMatch m = createMatchObject(host); 
+		
+		for (Long id : next_hops.keySet()) {
+			OFAction action = new OFActionOutput(next_hops.get(id));
+			OFInstruction instruction = new OFInstructionApplyActions(Arrays.asList(action));
+			SwitchCommands.installRule(
+					this.getSwitches().get(id), this.table,
+					SwitchCommands.DEFAULT_PRIORITY, m,
+					Arrays.asList(instruction));
+		}
+		
+		OFAction action = new OFActionOutput(host.getPort());
+		OFInstruction instruction = new OFInstructionApplyActions(
+			Arrays.asList(action));
+		SwitchCommands.installRule(host.getSwitch(), this.table, 
+				SwitchCommands.DEFAULT_PRIORITY, m, 
+				Arrays.asList(instruction));
+		
+		
+	}
+	
+	private Collection<Link> cleanLinks() {
+		Collection<Link> links = new ArrayList<Link>();
+		boolean duplicate;
+
+		for(Link l : this.getLinks()) {
+    			duplicate = false;
+
+    			for(Link ml : links) {
+    				if(l.getSrc() == ml.getSrc() && l.getDst() == ml.getDst() || 
+    					l.getDst() == ml.getSrc() && l.getSrc() == ml.getDst()) {
+    					
+    					duplicate = true;
+    					break;
+    				}
+    			}
+
+    			if(!duplicate) {
+    				links.add(l);
+    			}
+	    	
+		}
+
+	    return links;
+	}
+	
+	private Map<Long, Integer> findShortestPaths(IOFSwitch sw) {
+		Map<Long, Integer> dist = new ConcurrentHashMap<Long, Integer>();
+	    Map<Long, Integer> prev = new ConcurrentHashMap<Long,Integer>();
+	    Queue<Long> sQueue = new LinkedList<Long>();
+	    Collection<Link> links;
+	    
+	    for (IOFSwitch s : this.getSwitches().values()) {
+	    		dist.put(s.getId(), Integer.MAX_VALUE);
+	    }
+	    
+	    dist.put(sw.getId(), 0); 
+	    
+	    for (int i = 0; i < this.getSwitches().size(); i++)  {
+	    		links = cleanLinks(); 
+	    		sQueue.add(sw.getId()); 
+	    		
+	    		while (!sQueue.isEmpty()) {
+	    			long curId = sQueue.remove();
+		    		Collection<Link> cLinks = this.getAdjacentLinks(curId, links);
+
+		    		for (Link l : cLinks) {
+		    			int curDist = dist.get(curId);
+					int nextDist = Integer.MAX_VALUE;
+
+					if (curId == l.getSrc()) {
+					    	nextDist = dist.get(l.getDst());
+
+					    	if (nextDist > (curDist + 1)) {
+					    		dist.put(l.getDst(), (curDist + 1));
+					    		prev.put(l.getDst(), l.getDstPort());
+					    	}
+
+					    	sQueue.add(l.getDst());
+					} else {
+					    	nextDist = dist.get(l.getSrc());
+
+					    	if (nextDist > (curDist + 1)) {
+					    		dist.put(l.getSrc(), (curDist + 1));
+					    		prev.put(l.getSrc(), l.getSrcPort());
+					    	}
+
+					    	sQueue.add(l.getSrc());
+					}
+
+					links.remove(l);
+		    		}
+	    		}
+	    }
+	    
+	    return prev; 
+	}
+	
+	private Collection<Link> getAdjacentLinks(Long id, Collection<Link> links) {
+		Collection<Link> connected = new ArrayList<Link>(); 
+		
+		for (Link link : links) {
+			if (link.getDst() == id || link.getSrc() == id) {
+				connected.add(link); 
+			}
+		}
+		
+		return connected; 
+	}
+	
+	private void installAllEntries() {
+		for (Host h : this.getHosts()) {
+			this.reinstallEntries(h); 
+		}
+	}
+	
+	private void reinstallEntries(Host host) {
+		this.removeEntries(host); 
+		this.installEntries(host);
+	}
+	
+	private void removeEntries(Host host) {
+		for (IOFSwitch s : this.getSwitches().values()) {
+			SwitchCommands.removeRules(s, this.table, createMatchObject(host));
+		}
+	}
+	
+	
+	
 	
     /**
      * Get a list of all known hosts in the network.
@@ -124,6 +280,8 @@ public class L3Routing implements IFloodlightModule, IOFSwitchListener,
 			/*****************************************************************/
 			/* TODO: Update routing: add rules to route to new host          */
 			
+			this.installEntries(host);
+			
 			/*****************************************************************/
 		}
 	}
@@ -145,6 +303,8 @@ public class L3Routing implements IFloodlightModule, IOFSwitchListener,
 		
 		/*********************************************************************/
 		/* TODO: Update routing: remove rules to route to host               */
+		
+		this.removeEntries(host);
 		
 		/*********************************************************************/
 	}
@@ -174,6 +334,8 @@ public class L3Routing implements IFloodlightModule, IOFSwitchListener,
 		/*********************************************************************/
 		/* TODO: Update routing: change rules to route to host               */
 		
+		this.reinstallEntries(host);
+		
 		/*********************************************************************/
 	}
 	
@@ -190,6 +352,8 @@ public class L3Routing implements IFloodlightModule, IOFSwitchListener,
 		/*********************************************************************/
 		/* TODO: Update routing: change routing rules for all hosts          */
 		
+		this.installAllEntries();
+		
 		/*********************************************************************/
 	}
 
@@ -205,6 +369,8 @@ public class L3Routing implements IFloodlightModule, IOFSwitchListener,
 		
 		/*********************************************************************/
 		/* TODO: Update routing: change routing rules for all hosts          */
+		
+		this.installAllEntries();
 		
 		/*********************************************************************/
 	}
@@ -236,6 +402,8 @@ public class L3Routing implements IFloodlightModule, IOFSwitchListener,
 		
 		/*********************************************************************/
 		/* TODO: Update routing: change routing rules for all hosts          */
+		
+		this.installAllEntries();
 		
 		/*********************************************************************/
 	}
