@@ -1,20 +1,28 @@
 package edu.wisc.cs.sdn.apps.loadbalancer;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 
+import org.openflow.protocol.OFMatch;
 import org.openflow.protocol.OFMessage;
+import org.openflow.protocol.OFOXMFieldType;
 import org.openflow.protocol.OFPacketIn;
+import org.openflow.protocol.OFPort;
 import org.openflow.protocol.OFType;
-
+import org.openflow.protocol.action.OFActionOutput;
+import org.openflow.protocol.action.OFActionSetField;
+import org.openflow.protocol.instruction.OFInstructionApplyActions;
+import org.openflow.protocol.instruction.OFInstructionGotoTable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import edu.wisc.cs.sdn.apps.l3routing.L3Routing;
 import edu.wisc.cs.sdn.apps.util.ArpServer;
-
+import edu.wisc.cs.sdn.apps.util.SwitchCommands;
 import net.floodlightcontroller.core.FloodlightContext;
 import net.floodlightcontroller.core.IFloodlightProviderService;
 import net.floodlightcontroller.core.IOFMessageListener;
@@ -29,7 +37,10 @@ import net.floodlightcontroller.core.module.IFloodlightService;
 import net.floodlightcontroller.devicemanager.IDevice;
 import net.floodlightcontroller.devicemanager.IDeviceService;
 import net.floodlightcontroller.devicemanager.internal.DeviceManagerImpl;
+import net.floodlightcontroller.packet.ARP;
 import net.floodlightcontroller.packet.Ethernet;
+import net.floodlightcontroller.packet.IPv4;
+import net.floodlightcontroller.packet.TCP;
 import net.floodlightcontroller.util.MACAddress;
 
 public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
@@ -131,6 +142,49 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 		/*       (3) all other packets to the next rule table in the switch  */
 		
 		/*********************************************************************/
+
+		// need to creates rules for every vIP in instance list
+		for (Integer vIP : instances.keySet()){
+
+			// create rule for vIP matching
+			OFMatch tcpMatch = new OFMatch();
+			tcpMatch.setDataLayerType(OFMatch.ETH_TYPE_IPV4);
+			tcpMatch.setNetworkProtocol(OFMatch.IP_PROTO_TCP);
+			tcpMatch.setNetworkDestination(vIP);
+
+			// create rule for ARP matching
+			OFMatch arpMatch = new OFMatch();
+			arpMatch.setDataLayerType(OFMatch.ETH_TYPE_ARP);
+			arpMatch.setField(OFOXMFieldType.ARP_TPA, vIP);
+
+			// install rules to send correct packets to SDN controller (ie receive)
+			SwitchCommands.installRule(sw, table, SwitchCommands.DEFAULT_PRIORITY, 
+				tcpMatch, 
+				Arrays.asList(
+					new OFInstructionApplyActions(
+						Arrays.asList(
+							new OFActionOutput(OFPort.OFPP_CONTROLLER)
+						)
+					)
+				));
+			SwitchCommands.installRule(sw, table, SwitchCommands.DEFAULT_PRIORITY, 
+				arpMatch,
+				Arrays.asList(
+					new OFInstructionApplyActions(
+						Arrays.asList(
+							new OFActionOutput(OFPort.OFPP_CONTROLLER)
+						)
+					)
+				));
+		}
+
+		// install rule to send all others to next table w/ low priority
+		SwitchCommands.installRule(sw, table, SwitchCommands.MIN_PRIORITY, 
+			new OFMatch(), 
+			Arrays.asList(
+				new OFInstructionGotoTable(L3Routing.table)
+			));
+
 	}
 	
 	/**
@@ -161,6 +215,92 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 		/*       ignore all other packets                                    */
 		
 		/*********************************************************************/
+
+		IPv4 ipPkt;
+		TCP tcpPkt;
+		ARP arpPkt;
+		int vIP;
+
+		// check for TCP SYN packet w/ virtual IP 
+		if(ethPkt.getEtherType() == Ethernet.TYPE_IPv4 && 
+			(ipPkt = (IPv4)ethPkt.getPayload()).getProtocol() == IPv4.PROTOCOL_TCP &&
+			(tcpPkt = (TCP)ipPkt.getPayload()).getFlags() == TCP_FLAG_SYN) &&
+			(instances.contains(vIP = ipPkt.getDestinationAddress())) {
+
+			// next real IP from the LoadBalancerInstance associated w/ vIP
+			int nextInstanceIP = instances.get(vIP).getNextHostIP();
+
+			OFMatch clientMatch = new OFMatch();
+			clientMatch.setDataLayerType(OFMatch.ETH_TYPE_IPV4);
+			clientMatch.setNetworkProtocol(OFMatch.IP_PROTO_TCP);
+			clientMatch.setNetworkDestination(ipPkt.getDestinationAddress());
+			clientMatch.setNetworkSource(ipPkt.getSourceAddress());
+			clientMatch.setTransportDestination(tcpPkt.getDestinationPort());
+			clientMatch.setTransportSource(tcpPkt.getSourcePort());
+
+			OFMatch serverMatch = new OFMatch();
+			serverMatch.setDataLayerType(OFMatch.ETH_TYPE_IPV4);
+			serverMatch.setNetworkProtocol(OFMatch.IP_PROTO_TCP);
+			serverMatch.setNetworkDestination(ipPkt.getSourceAddress());
+			serverMatch.setNetworkSource(nextInstanceIP);
+			serverMatch.setTransportDestination(tcpPkt.getSourcePort());
+			serverMatch.setTransportSource(tcpPkt.getDestinationPort());
+
+			SwitchCommands.installRule(sw, table, SwitchCommands.MAX_PRIORITY, 
+				clientMatch, 
+				Arrays.asList(
+					new OFInstructionApplyActions(
+						Arrays.asList(
+							new OFActionSetField(OFOXMFieldType.ETH_DST,
+								getHostMACAddress(nextInstanceIP)),
+							new OFActionSetField(OFOXMFieldType.IPV4_DST, nextInstanceIP)
+						)
+					),
+					new OFInstructionGotoTable(L3Routing.table)
+				),
+				SwitchCommands.NO_TIMEOUT,
+				IDLE_TIMEOUT);
+
+			SwitchCommands.installRule(sw, table, SwitchCommands.MAX_PRIORITY,
+				serverMatch,
+				Arrays.asList(
+					new OFInstructionApplyActions(
+						Arrays.asList(
+							new OFActionSetField(OFOXMFieldType.ETH_SRC,
+								instances.get(vIP).getVirtualMAC()),
+							new OFActionSetField(OFOXMFieldType.IPV4_SRC, vIP)
+						)
+					),
+					new OFInstructionGotoTable(L3Routing.table)
+				),
+				SwitchCommands.NO_TIMEOUT,
+				IDLE_TIMEOUT);
+		// check for ARP packet w/ virtual IP dest
+		} else if (ethPkt.getEtherType() == Ethernet.TYPE_ARP &&
+			instances.containsKey(vIP = (IPv4.toIPv4Address((arpPkt = (ARP)ethPkt.getPayload()).getTargetProtocolAddress())))){
+
+			ARP arpReply = new ARP();
+			Ethernet ethReply = new Ethernet();
+
+			byte[] vMAC = instances.get(vIP).getVirtualMAC();
+
+			ethReply.setEtherType(Ethernet.TYPE_ARP);
+			ethReply.setSourceMACAddress(ethPkt.getSourceMACAddress());
+			ethReply.setDestinationMACAddress(vMAC);
+			ethReply.setPayload(arpReply);
+
+			arpReply.setHardwareType(Ethernet.TYPE_ARP);
+			arpReply.setOpCode(ARP.OP_REPLY);
+			arpReply.setProtocolType(ARP.PROTO_TYPE_IP);
+			arpReply.setHardwareAddressLength(arpPkt.getHardwareAddressLength());
+			arpReply.setProtocolAddressLength(arpPkt.getProtocolAddressLength());
+			arpReply.setSenderHardwareAddress(vMAC);
+			arpReply.setSenderProtocolAddress(vIP);
+			arpReply.setTargetHardwareAddress(arpPkt.getSenderHardwareAddress());
+			arpReply.setTargetProtocolAddress(arpPkt.getSenderProtocolAddress());
+
+			SwitchCommands.sendPacket(sw, (short)pktIn.getInPort(), ethReply);
+		}
 
 		
 		// We don't care about other packets
