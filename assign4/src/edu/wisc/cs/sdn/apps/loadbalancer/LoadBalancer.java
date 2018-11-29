@@ -223,21 +223,16 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 		ARP arpPkt;
 		int vIP;
 
-                log.info(String.format("SDN controller received"));
-
-		// check for TCP SYN packet w/ virtual IP 
+		// check for IPv4 TCP SYN packet w/ virtual IP as destination 
 		if(ethPkt.getEtherType() == Ethernet.TYPE_IPv4 && 
 			(ipPkt = (IPv4)ethPkt.getPayload()).getProtocol() == IPv4.PROTOCOL_TCP &&
 			(tcpPkt = (TCP)ipPkt.getPayload()).getFlags() == TCP_FLAG_SYN &&
 			(instances.containsKey(vIP = ipPkt.getDestinationAddress()))) {
 
-                        log.info(String.format("new connection from %s to %s", IPv4.fromIPv4Address(ipPkt.getSourceAddress()), IPv4.fromIPv4Address(vIP)));
-
 			// next real IP from the LoadBalancerInstance associated w/ vIP
 			int nextInstanceIP = instances.get(vIP).getNextHostIP();
 
-                        log.info(String.format("real IP match %s", IPv4.fromIPv4Address(nextInstanceIP)));
-
+			// match client->vIP packets
 			OFMatch clientMatch = new OFMatch();
 			clientMatch.setDataLayerType(OFMatch.ETH_TYPE_IPV4);
 			clientMatch.setNetworkProtocol(OFMatch.IP_PROTO_TCP);
@@ -246,6 +241,7 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 			clientMatch.setTransportDestination(tcpPkt.getDestinationPort());
 			clientMatch.setTransportSource(tcpPkt.getSourcePort());
 
+			// match server->vIP packets
 			OFMatch serverMatch = new OFMatch();
 			serverMatch.setDataLayerType(OFMatch.ETH_TYPE_IPV4);
 			serverMatch.setNetworkProtocol(OFMatch.IP_PROTO_TCP);
@@ -254,6 +250,7 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 			serverMatch.setTransportDestination(tcpPkt.getSourcePort());
 			serverMatch.setTransportSource(tcpPkt.getDestinationPort());
 
+			// install rules to change IP/MAC and forward to the L3 routing table
 			SwitchCommands.installRule(sw, table, (short)(SwitchCommands.DEFAULT_PRIORITY+2), 
 				clientMatch, 
 				Arrays.<OFInstruction>asList(
@@ -283,22 +280,24 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 				),
 				SwitchCommands.NO_TIMEOUT,
 				IDLE_TIMEOUT);
+
 		// check for ARP packet w/ virtual IP dest
 		} else if (ethPkt.getEtherType() == Ethernet.TYPE_ARP &&
 			instances.containsKey(vIP = (IPv4.toIPv4Address((arpPkt = (ARP)ethPkt.getPayload()).getTargetProtocolAddress())))){
 
-                        log.info(String.format("creating ARP packet reply for virtual ip %s", IPv4.fromIPv4Address(vIP)));
-
 			ARP arpReply = new ARP();
 			Ethernet ethReply = new Ethernet();
 
+			// virtual MAC associated with the vIP
 			byte[] vMAC = instances.get(vIP).getVirtualMAC();
 
+			// setup Ethernet packet fields
 			ethReply.setEtherType(Ethernet.TYPE_ARP);
 			ethReply.setSourceMACAddress(vMAC);
 			ethReply.setDestinationMACAddress(ethPkt.getSourceMACAddress());
 			ethReply.setPayload(arpReply);
 
+			// setup ARP fields
 			arpReply.setHardwareType(ARP.HW_TYPE_ETHERNET);
 			arpReply.setOpCode(ARP.OP_REPLY);
 			arpReply.setProtocolType(ARP.PROTO_TYPE_IP);
@@ -309,11 +308,8 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 			arpReply.setTargetHardwareAddress(arpPkt.getSenderHardwareAddress());
 			arpReply.setTargetProtocolAddress(arpPkt.getSenderProtocolAddress());
 
-                        //log.info(arpReply.toString());
-
 			SwitchCommands.sendPacket(sw, (short)pktIn.getInPort(), ethReply);
 		}
-
 		
 		// We don't care about other packets
 		return Command.CONTINUE;
