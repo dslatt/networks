@@ -13,8 +13,10 @@ import org.openflow.protocol.OFOXMFieldType;
 import org.openflow.protocol.OFPacketIn;
 import org.openflow.protocol.OFPort;
 import org.openflow.protocol.OFType;
+import org.openflow.protocol.action.OFAction;
 import org.openflow.protocol.action.OFActionOutput;
 import org.openflow.protocol.action.OFActionSetField;
+import org.openflow.protocol.instruction.OFInstruction;
 import org.openflow.protocol.instruction.OFInstructionApplyActions;
 import org.openflow.protocol.instruction.OFInstructionGotoTable;
 import org.slf4j.Logger;
@@ -158,20 +160,20 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 			arpMatch.setField(OFOXMFieldType.ARP_TPA, vIP);
 
 			// install rules to send correct packets to SDN controller (ie receive)
-			SwitchCommands.installRule(sw, table, SwitchCommands.DEFAULT_PRIORITY, 
+			SwitchCommands.installRule(sw, table, (short)(SwitchCommands.DEFAULT_PRIORITY+1), 
 				tcpMatch, 
-				Arrays.asList(
+				Arrays.<OFInstruction>asList(
 					new OFInstructionApplyActions(
-						Arrays.asList(
+						Arrays.<OFAction>asList(
 							new OFActionOutput(OFPort.OFPP_CONTROLLER)
 						)
 					)
 				));
-			SwitchCommands.installRule(sw, table, SwitchCommands.DEFAULT_PRIORITY, 
+			SwitchCommands.installRule(sw, table, (short)(SwitchCommands.DEFAULT_PRIORITY+1), 
 				arpMatch,
-				Arrays.asList(
+				Arrays.<OFInstruction>asList(
 					new OFInstructionApplyActions(
-						Arrays.asList(
+						Arrays.<OFAction>asList(
 							new OFActionOutput(OFPort.OFPP_CONTROLLER)
 						)
 					)
@@ -179,9 +181,9 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 		}
 
 		// install rule to send all others to next table w/ low priority
-		SwitchCommands.installRule(sw, table, SwitchCommands.MIN_PRIORITY, 
+		SwitchCommands.installRule(sw, table, SwitchCommands.DEFAULT_PRIORITY, 
 			new OFMatch(), 
-			Arrays.asList(
+			Arrays.<OFInstruction>asList(
 				new OFInstructionGotoTable(L3Routing.table)
 			));
 
@@ -221,14 +223,20 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 		ARP arpPkt;
 		int vIP;
 
+                log.info(String.format("SDN controller received"));
+
 		// check for TCP SYN packet w/ virtual IP 
 		if(ethPkt.getEtherType() == Ethernet.TYPE_IPv4 && 
 			(ipPkt = (IPv4)ethPkt.getPayload()).getProtocol() == IPv4.PROTOCOL_TCP &&
-			(tcpPkt = (TCP)ipPkt.getPayload()).getFlags() == TCP_FLAG_SYN) &&
-			(instances.contains(vIP = ipPkt.getDestinationAddress())) {
+			(tcpPkt = (TCP)ipPkt.getPayload()).getFlags() == TCP_FLAG_SYN &&
+			(instances.containsKey(vIP = ipPkt.getDestinationAddress()))) {
+
+                        log.info(String.format("new connection from %s to %s", IPv4.fromIPv4Address(ipPkt.getSourceAddress()), IPv4.fromIPv4Address(vIP)));
 
 			// next real IP from the LoadBalancerInstance associated w/ vIP
 			int nextInstanceIP = instances.get(vIP).getNextHostIP();
+
+                        log.info(String.format("real IP match %s", IPv4.fromIPv4Address(nextInstanceIP)));
 
 			OFMatch clientMatch = new OFMatch();
 			clientMatch.setDataLayerType(OFMatch.ETH_TYPE_IPV4);
@@ -246,11 +254,11 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 			serverMatch.setTransportDestination(tcpPkt.getSourcePort());
 			serverMatch.setTransportSource(tcpPkt.getDestinationPort());
 
-			SwitchCommands.installRule(sw, table, SwitchCommands.MAX_PRIORITY, 
+			SwitchCommands.installRule(sw, table, (short)(SwitchCommands.DEFAULT_PRIORITY+2), 
 				clientMatch, 
-				Arrays.asList(
+				Arrays.<OFInstruction>asList(
 					new OFInstructionApplyActions(
-						Arrays.asList(
+						Arrays.<OFAction>asList(
 							new OFActionSetField(OFOXMFieldType.ETH_DST,
 								getHostMACAddress(nextInstanceIP)),
 							new OFActionSetField(OFOXMFieldType.IPV4_DST, nextInstanceIP)
@@ -261,11 +269,11 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 				SwitchCommands.NO_TIMEOUT,
 				IDLE_TIMEOUT);
 
-			SwitchCommands.installRule(sw, table, SwitchCommands.MAX_PRIORITY,
+			SwitchCommands.installRule(sw, table, (short)(SwitchCommands.DEFAULT_PRIORITY+2),
 				serverMatch,
-				Arrays.asList(
+				Arrays.<OFInstruction>asList(
 					new OFInstructionApplyActions(
-						Arrays.asList(
+						Arrays.<OFAction>asList(
 							new OFActionSetField(OFOXMFieldType.ETH_SRC,
 								instances.get(vIP).getVirtualMAC()),
 							new OFActionSetField(OFOXMFieldType.IPV4_SRC, vIP)
@@ -279,17 +287,19 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 		} else if (ethPkt.getEtherType() == Ethernet.TYPE_ARP &&
 			instances.containsKey(vIP = (IPv4.toIPv4Address((arpPkt = (ARP)ethPkt.getPayload()).getTargetProtocolAddress())))){
 
+                        log.info(String.format("creating ARP packet reply for virtual ip %s", IPv4.fromIPv4Address(vIP)));
+
 			ARP arpReply = new ARP();
 			Ethernet ethReply = new Ethernet();
 
 			byte[] vMAC = instances.get(vIP).getVirtualMAC();
 
 			ethReply.setEtherType(Ethernet.TYPE_ARP);
-			ethReply.setSourceMACAddress(ethPkt.getSourceMACAddress());
-			ethReply.setDestinationMACAddress(vMAC);
+			ethReply.setSourceMACAddress(vMAC);
+			ethReply.setDestinationMACAddress(ethPkt.getSourceMACAddress());
 			ethReply.setPayload(arpReply);
 
-			arpReply.setHardwareType(Ethernet.TYPE_ARP);
+			arpReply.setHardwareType(ARP.HW_TYPE_ETHERNET);
 			arpReply.setOpCode(ARP.OP_REPLY);
 			arpReply.setProtocolType(ARP.PROTO_TYPE_IP);
 			arpReply.setHardwareAddressLength(arpPkt.getHardwareAddressLength());
@@ -298,6 +308,8 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 			arpReply.setSenderProtocolAddress(vIP);
 			arpReply.setTargetHardwareAddress(arpPkt.getSenderHardwareAddress());
 			arpReply.setTargetProtocolAddress(arpPkt.getSenderProtocolAddress());
+
+                        //log.info(arpReply.toString());
 
 			SwitchCommands.sendPacket(sw, (short)pktIn.getInPort(), ethReply);
 		}
