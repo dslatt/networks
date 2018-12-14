@@ -67,7 +67,9 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
     private byte table;
     
     // Set of virtual IPs and the load balancer instances they correspond with
-    private Map<Integer,LoadBalancerInstance> instances;
+	private Map<Integer,LoadBalancerInstance> instances;
+
+	private ArpServer arpSrver;
 
     /**
      * Loads dependencies and initializes data structures.
@@ -105,7 +107,9 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
         
         /*********************************************************************/
         /* TODO: Initialize other class variables, if necessary              */
-        
+		
+		arpSrver.init(context);
+
         /*********************************************************************/
 	}
 
@@ -123,6 +127,8 @@ public class LoadBalancer implements IFloodlightModule, IOFSwitchListener,
 		/*********************************************************************/
 		/* TODO: Perform other tasks, if necessary                           */
 		
+		arpSrver.startUp(context);
+
 		/*********************************************************************/
 	}
 	
