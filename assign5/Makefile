@@ -1,11 +1,12 @@
 JC = javac
 J = java
 FIND = find
+ROOTSERVER = 199.9.14.201
 MAIN = edu.wisc.cs.sdn.simpledns.SimpleDNS
 CLSPATH = lib/*
 SRCPATH = src/
 JFLAGS = -cp "$(SRCPATH):$(CLSPATH)"
-PFLAGS = -r 198.41.0.4 -e ec2.csv
+PFLAGS = -r $(ROOTSERVER) -e ec2.csv
 JCFLAGS = -g -sourcepath $(SRCPATH) -classpath $(CLSPATH)
 
 SOURCES = \

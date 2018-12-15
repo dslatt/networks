@@ -91,7 +91,7 @@ public class SimpleDNS
 
         		if (dns.isRecursionDesired()) {
 					System.out.println("solving recursively");
-        			replyPacket = solveRecursively(packet); 
+        			replyPacket = solveRecursively(packet,null, true); 
         		} else {
 					System.out.println("solving once");
         			replyPacket = solveOnce(packet); 
@@ -131,12 +131,13 @@ public class SimpleDNS
 		return receivePacket; 
 	}
 	
-	private static DatagramPacket solveRecursively(DatagramPacket pack) throws Exception {
+	private static DatagramPacket solveRecursively(DatagramPacket pack, DatagramSocket socket, boolean top) throws Exception {
 
 		System.out.println("CALLINGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG");
 
-		DatagramSocket socket = new DatagramSocket();
-
+		if (socket == null){
+			socket = new DatagramSocket();
+		}
 
 		DatagramPacket sendPacket = new DatagramPacket(pack.getData(), pack.getLength(), root_servIP, 53); 
 		DatagramPacket receivePacket = null;//new DatagramPacket(new byte[1500], 1500); 
@@ -147,6 +148,7 @@ public class SimpleDNS
 		
 		socket.send(sendPacket);
 
+		// save this packet status for reasons I forgot
 		DatagramPacket ogSend = sendPacket;
 		
 		while (true) {
@@ -230,6 +232,7 @@ public class SimpleDNS
 					}
 					
 					// not sure if these are needed
+					// not including these would mean that the auth/addit sections on the result would be empty
 					if (receiveDNS.getAuthorities().size() == 0) {
 						receiveDNS.setAuthorities(prevAuth);
 					}
@@ -247,10 +250,11 @@ public class SimpleDNS
 					receiveDNS.setAuthoritative(false); 
 					receiveDNS.setOpcode((byte)0);
 					
+					// have to rewrite the question in case a CNAME was followed, otherwise dig gets mad
 					DNS ogDNS = DNS.deserialize(pack.getData(), pack.getLength());
 					receiveDNS.setQuestions(ogDNS.getQuestions());
 
-					socket.close(); 
+					if (top) socket.close(); 
 					
 					System.out.println("RETURNINGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG");
 
@@ -279,10 +283,13 @@ public class SimpleDNS
 				}
 
 				if (diffServ == null) {
-					// Admit defeat
 					DNS response = new DNS(); 
 					
 					System.out.println("got null diffserv");
+
+					// If there is no match between auths/addits, recursively search on one of the auth names
+					// Done by calling solveRecursively again, to get the resulting ip of said auth
+					// After that, pass the original query to the new IP you got to continue the search
 					if(author.size() != 0){
 						System.out.println("got auth w/o additional. need to recurse here");
 
@@ -302,7 +309,7 @@ public class SimpleDNS
 
 						DatagramPacket sendLocalPacket = new DatagramPacket(request.serialize(), request.getLength(), root_servIP, 53);
 
-						DatagramPacket result = solveRecursively(sendLocalPacket);
+						DatagramPacket result = solveRecursively(sendLocalPacket,socket, false);
 
 						
 						DNS resultDNS = DNS.deserialize(result.getData(), result.getLength());
@@ -314,51 +321,55 @@ public class SimpleDNS
 						socket.send(sendPacket);
 
 					}else{
-					// Add the cnames
-					for (DNSResourceRecord cname : cnames) {
-						answers.add(cname); 
-					}
-					
-					response.setAnswers(answers);
-					response.setQuestions(DNS.deserialize(pack.getData(), pack.getLength()).getQuestions()); 
-					
-					// Remove bad types
-					Collection<DNSResourceRecord> remove = new ArrayList<DNSResourceRecord>();
-					for (DNSResourceRecord auth : author) {
-						if (!checkQueryType(auth.getType()))
-							remove.add(auth);
-					}
-					author.removeAll(remove);
 
-					if (author.size() == 0) {
-						author = prevAuth; 
-					}
+						// actually out of options here
+						// not sure what you had this code doing here
 
-					remove.clear();
+						// Add the cnames
+						for (DNSResourceRecord cname : cnames) {
+							answers.add(cname); 
+						}
+					
+						response.setAnswers(answers);
+						response.setQuestions(DNS.deserialize(pack.getData(), pack.getLength()).getQuestions()); 
+					
+						// Remove bad types
+						Collection<DNSResourceRecord> remove = new ArrayList<DNSResourceRecord>();
+						for (DNSResourceRecord auth : author) {
+							if (!checkQueryType(auth.getType()))
+								remove.add(auth);
+						}
+						author.removeAll(remove);
 
-					for (DNSResourceRecord addi : addit) {
-						if (!checkQueryType(addi.getType()))
-							remove.add(addi);
-					}
-					addit.removeAll(remove);
-					
-					if (addit.size() == 0) {
-						addit = prevAdditionals; 
-					}
+						if (author.size() == 0) {
+							author = prevAuth; 
+						}
 
-					remove.clear(); 
+						remove.clear();
+
+						for (DNSResourceRecord addi : addit) {
+							if (!checkQueryType(addi.getType()))
+								remove.add(addi);
+						}
+						addit.removeAll(remove);
+					
+						if (addit.size() == 0) {
+							addit = prevAdditionals; 
+						}
+
+						remove.clear(); 
 					
 					
-					response.setAuthorities(author);
-					response.setAdditional(addit);
-					response.setQuery(false);
-					response.setOpcode((byte)0);
-					response.setRcode((byte)0); 
-					response.setId(DNS.deserialize(pack.getData(), pack.getLength()).getId());
+						response.setAuthorities(author);
+						response.setAdditional(addit);
+						response.setQuery(false);
+						response.setOpcode((byte)0);
+						response.setRcode((byte)0); 
+						response.setId(DNS.deserialize(pack.getData(), pack.getLength()).getId());
 					
-					socket.close();
+						if (top) socket.close();
 					
-					return new DatagramPacket(response.serialize(), response.getLength()); 
+						return new DatagramPacket(response.serialize(), response.getLength()); 
 					}
 
 					
