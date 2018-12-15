@@ -100,6 +100,7 @@ public class SimpleDNS
         		replyPacket.setAddress(packet.getAddress());
 				replyPacket.setPort(packet.getPort());
 
+				System.out.println("SENDING RESULTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT");
 				socket.send(replyPacket);
         	}
         }
@@ -131,6 +132,9 @@ public class SimpleDNS
 	}
 	
 	private static DatagramPacket solveRecursively(DatagramPacket pack) throws Exception {
+
+		System.out.println("CALLINGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG");
+
 		DatagramSocket socket = new DatagramSocket();
 
 
@@ -142,8 +146,11 @@ public class SimpleDNS
 		List<DNSResourceRecord> cnames = new ArrayList<DNSResourceRecord>(); 
 		
 		socket.send(sendPacket);
+
+		DatagramPacket ogSend = sendPacket;
 		
 		while (true) {
+			System.out.println("receiving new packet");
 			receivePacket = new DatagramPacket(new byte[1500], 1500);
 			socket.receive(receivePacket);
 			
@@ -179,6 +186,8 @@ public class SimpleDNS
 				if (answer.getType() == DNS.TYPE_CNAME) {
 					cnames.add(answer); 
 					
+					System.out.println("got cname so redoing calls from the root server on cname data");
+
 					// Send another request with the cname
 					DNSRdataName cname = (DNSRdataName) answer.getData();
 					List<DNSQuestion> questions = new ArrayList<DNSQuestion>(); 
@@ -191,11 +200,17 @@ public class SimpleDNS
 					request.setRecursionDesired(true);
 					request.setId(DNS.deserialize(pack.getData(), pack.getLength()).getId());
 					
-					socket.send(new DatagramPacket(request.serialize(), request.getLength()));
+					System.out.println("sending CNAME REQUEST\n" + request.toString());
+
+					sendPacket = new DatagramPacket(request.serialize(), request.getLength(), root_servIP, 53);
+
+					socket.send(sendPacket);
 					
 				} else {
 					if (answer.getType() == DNS.TYPE_A) {
 						// TODO: Check against EC2 address and append TXT record
+
+						System.out.println("got A record result");
 
 						for (int i = 0; i < ec2Addresses.size(); i++){
 							IPAddress ipaddr = new IPAddressString(ec2Addresses.get(i)).toAddress();
@@ -214,6 +229,7 @@ public class SimpleDNS
 						answers.add(name); 
 					}
 					
+					// not sure if these are needed
 					if (receiveDNS.getAuthorities().size() == 0) {
 						receiveDNS.setAuthorities(prevAuth);
 					}
@@ -231,8 +247,13 @@ public class SimpleDNS
 					receiveDNS.setAuthoritative(false); 
 					receiveDNS.setOpcode((byte)0);
 					
+					DNS ogDNS = DNS.deserialize(pack.getData(), pack.getLength());
+					receiveDNS.setQuestions(ogDNS.getQuestions());
+
 					socket.close(); 
 					
+					System.out.println("RETURNINGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG");
+
 					DatagramPacket response = new DatagramPacket(receiveDNS.serialize(), receiveDNS.getLength()); 
 					return response; 
 					
@@ -262,7 +283,37 @@ public class SimpleDNS
 					DNS response = new DNS(); 
 					
 					System.out.println("got null diffserv");
+					if(author.size() != 0){
+						System.out.println("got auth w/o additional. need to recurse here");
 
+						// Send another request with the cname
+						DNSRdataName aname = (DNSRdataName) author.get(0).getData();
+						List<DNSQuestion> questions = new ArrayList<DNSQuestion>(); 
+						questions.add(new DNSQuestion(aname.getName(), receiveDNS.getQuestions().get(0).getType())); 
+					
+						DNS request = new DNS(); 
+						request.setQuery(true);
+						request.setQuestions(questions);
+						request.setTruncated(false);
+						request.setRecursionDesired(true);
+						request.setId(DNS.deserialize(pack.getData(), pack.getLength()).getId());
+					
+						System.out.println("sending ANAME REQUEST\n" + request.toString());
+
+						DatagramPacket sendLocalPacket = new DatagramPacket(request.serialize(), request.getLength(), root_servIP, 53);
+
+						DatagramPacket result = solveRecursively(sendLocalPacket);
+
+						
+						DNS resultDNS = DNS.deserialize(result.getData(), result.getLength());
+						DNSRdataAddress ip = (DNSRdataAddress)resultDNS.getAnswers().get(0).getData();
+						
+
+						sendPacket = new DatagramPacket(sendPacket.getData(), sendPacket.getLength(), ip.getAddress(), 53);
+
+						socket.send(sendPacket);
+
+					}else{
 					// Add the cnames
 					for (DNSResourceRecord cname : cnames) {
 						answers.add(cname); 
@@ -308,8 +359,15 @@ public class SimpleDNS
 					socket.close();
 					
 					return new DatagramPacket(response.serialize(), response.getLength()); 
+					}
+
+					
 				} else {
-					socket.send(new DatagramPacket(receivePacket.getData(), receivePacket.getLength(), diffServ, 53));
+					DatagramPacket nextPacket = new DatagramPacket(sendPacket.getData(), sendPacket.getLength(), diffServ, 53);
+					DNS dd = DNS.deserialize(nextPacket.getData(), nextPacket.getLength());
+					System.out.println(dd.toString());
+
+					socket.send(nextPacket);
 				}
 			}
 			
