@@ -1,12 +1,12 @@
 package edu.wisc.cs.sdn.simpledns;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.util.*; 
+import java.util.*;
 
-import edu.wisc.cs.sdn.simpledns.packet.DNS;
 import edu.wisc.cs.sdn.simpledns.packet.*;
 
 import inet.ipaddr.*;
@@ -15,6 +15,13 @@ public class SimpleDNS
 {
 
 	private static String ec2_csv;
+	private static String root_server;
+	private static InetAddress root_servIP;
+
+	private static List<String> ec2Addresses = new ArrayList<>();
+	private static List<String> ec2Regions = new ArrayList<>();
+
+	public static final short TYPE_TXT = 16;
 
 	public static void main(String[] args)
 	{
@@ -23,28 +30,38 @@ public class SimpleDNS
 			System.out.println("bad args");
 			return; 
 		}
-		
-		System.out.println("passed argscheck");
 
 		// Get the root server and ec2 csv
-		String root_server = null; 
-		ec2_csv = null; 
+		root_server = args[1];
+		ec2_csv = args[3];
 		
-        for (int i = 0; i < args.length; i++) {
-        	if (args[i] == "-r") {
-        		root_server = args[i+1];
-        	}
-        	if (args[i] == "-e") {
-        		ec2_csv = args[i+1]; 
-        	}
-        }
-		
-		System.out.println("gonna enter main part");
+		System.out.println(root_server + "\n" + ec2_csv);
+
+
+		try {
+			// Saves ec2 info into lists for quick access (assumes well formatted file)
+			File f = new File(ec2_csv);
+			Scanner scnr = new Scanner(f);
+
+			while(scnr.hasNextLine()){
+				String line = scnr.nextLine();
+				String[] sp = line.split(",");
+
+				if (sp.length == 2){
+					ec2Addresses.add(sp[0]);
+					ec2Regions.add(sp[1]);
+				}
+			}
+		} catch (FileNotFoundException e){
+			System.out.println("couldnt find ec2 file " + ec2_csv + ". exiting...");
+			return;
+		}
+
 
         // Get the data from the socket
         try {
         	DatagramSocket socket = new DatagramSocket(8053); 
-        	InetAddress root_servIP = InetAddress.getByName(root_server); 
+        	root_servIP = InetAddress.getByName(root_server); 
         	DatagramPacket packet = new DatagramPacket(new byte[1500], 1500); 
 			
 			System.out.println("enter inf loop");
@@ -53,9 +70,10 @@ public class SimpleDNS
 				
 				System.out.println("socket receive");
 
+
+
         		DNS dns = DNS.deserialize(packet.getData(), packet.getLength()); 
-				
-				System.out.println("crated DNS result");
+				//System.out.println(dns.toString());
 
         		// Check the opcode for only the standard (0)
         		if (dns.getOpcode() != DNS.OPCODE_STANDARD_QUERY) {
@@ -70,50 +88,54 @@ public class SimpleDNS
         		}
         		
         		DatagramPacket replyPacket; 
-				
-				System.out.println("solve the problem");
+
         		if (dns.isRecursionDesired()) {
 					System.out.println("solving recursively");
-        			replyPacket = solveRecursively(packet, root_servIP); 
+        			replyPacket = solveRecursively(packet); 
         		} else {
 					System.out.println("solving once");
-        			replyPacket = solveOnce(packet, root_servIP); 
+        			replyPacket = solveOnce(packet); 
         		}
         		
         		replyPacket.setAddress(packet.getAddress());
 				replyPacket.setPort(packet.getPort());
 
-				System.out.println("socket send");
 				socket.send(replyPacket);
         	}
         }
         catch (Exception e) {
-			System.out.println("exception here");
+			e.printStackTrace();
         	return; 
         }
 	}
 	
-	private static DatagramPacket solveOnce(DatagramPacket pack, InetAddress root_servIP) throws Exception {
-		DatagramSocket socket = new DatagramSocket(); 
-		
+	private static DatagramPacket solveOnce(DatagramPacket pack) throws Exception {
+		DatagramSocket socket = new DatagramSocket();
+
 		DatagramPacket sendPacket = new DatagramPacket(pack.getData(), pack.getLength(), root_servIP, 53); 
-		DatagramPacket receivePacket = new DatagramPacket(new byte[2000], 2000); 
-		
+		DatagramPacket receivePacket = new DatagramPacket(new byte[1500], 1500);
+
+		System.out.println("sending packet once");	
 		socket.send(sendPacket);
-		System.out.println("sending packet once");
-		socket.receive(receivePacket);
 		System.out.println("receiving packet once");
-		socket.close();
-		System.out.println("closed socket");
+		socket.receive(receivePacket);
 		
+		System.out.println("never receieve");
+
+		DNS receiveDNS = DNS.deserialize(receivePacket.getData(), receivePacket.getLength());
+		System.out.println(receiveDNS.toString());
+
+		socket.close();
+
 		return receivePacket; 
 	}
 	
-	private static DatagramPacket solveRecursively(DatagramPacket pack, InetAddress root_servIP) throws Exception {
-		DatagramSocket socket = new DatagramSocket(); 
-		
+	private static DatagramPacket solveRecursively(DatagramPacket pack) throws Exception {
+		DatagramSocket socket = new DatagramSocket();
+
+
 		DatagramPacket sendPacket = new DatagramPacket(pack.getData(), pack.getLength(), root_servIP, 53); 
-		DatagramPacket receivePacket = new DatagramPacket(new byte[1500], 1500); 
+		DatagramPacket receivePacket = null;//new DatagramPacket(new byte[1500], 1500); 
 		
 		List<DNSResourceRecord> prevAuth = new ArrayList<DNSResourceRecord>(); 
 		List<DNSResourceRecord> prevAdditionals = new ArrayList<DNSResourceRecord>(); 
@@ -122,14 +144,17 @@ public class SimpleDNS
 		socket.send(sendPacket);
 		
 		while (true) {
+			receivePacket = new DatagramPacket(new byte[1500], 1500);
 			socket.receive(receivePacket);
 			
 			DNS receiveDNS = DNS.deserialize(receivePacket.getData(), receivePacket.getLength()); 
 			
+			System.out.println(receiveDNS.toString());
+
 			List<DNSResourceRecord> author = receiveDNS.getAuthorities(); 
 			List<DNSResourceRecord> addit = receiveDNS.getAdditional(); 
 			List<DNSResourceRecord> answers = receiveDNS.getAnswers(); 
-			
+
 			// Check if there are any additionals
 			if (author.size()> 0) {
 				for (DNSResourceRecord rec : author) {
@@ -149,6 +174,8 @@ public class SimpleDNS
 			if (answers.size() > 0) {
 				DNSResourceRecord answer = answers.get(0); 
 				
+				System.out.println("using answers");
+
 				if (answer.getType() == DNS.TYPE_CNAME) {
 					cnames.add(answer); 
 					
@@ -166,38 +193,21 @@ public class SimpleDNS
 					
 					socket.send(new DatagramPacket(request.serialize(), request.getLength()));
 					
-					
 				} else {
 					if (answer.getType() == DNS.TYPE_A) {
 						// TODO: Check against EC2 address and append TXT record
 
-						File ec2 = new File(ec2_csv);
+						for (int i = 0; i < ec2Addresses.size(); i++){
+							IPAddress ipaddr = new IPAddressString(ec2Addresses.get(i)).toAddress();
 
-						Scanner scnr = new Scanner(ec2);
-						scnr.useDelimiter(",");
-
-						int count = 0;
-
-						IPAddress addr = null;
-
-						while(scnr.hasNext()){
-							if (count % 2 == 0){
-								//even (ie CIDR)
-								addr = new IPAddressString(scnr.next()).toAddress();
-							}else{
-								// odd (ie region)
-								String region = scnr.next();
-
-								String ipp = ((DNSRdataAddress)answer.getData()).getAddress().toString();
-								System.out.println(ipp);
-								// if (addr.contains(new IPAddressString(((DNSRdataAddress)answer.getData()).getAddress().).getAddress())){
-
-								// }
-
+							String ip = ((DNSRdataAddress)answer.getData()).getAddress().getHostAddress();
+							String region = ec2Regions.get(i);
+							if (ipaddr.contains(new IPAddressString(ip).toAddress())){
+								System.out.println("our ip matches EC2 w/ region " + region);
+								answers.add(new DNSResourceRecord(answer.getName(), TYPE_TXT, new DNSRdataString(region + "-" + ip)));
+								break;
 							}
-							count++;
 						}
-
 					}
 					
 					for (DNSResourceRecord name: cnames) {
@@ -232,21 +242,27 @@ public class SimpleDNS
 				// We received no answer must check for a different server to ask
 				InetAddress diffServ = null; 
 				
+				System.out.println("no answers so have to go to authorities");
+
 				first: 
 				for (DNSResourceRecord au : author) {
 					for (DNSResourceRecord addi : addit) {
 						String servName = ((DNSRdataName) au.getData()).getName(); 
-						if (au.getType() == DNS.TYPE_NS && addi.getType() == DNS.TYPE_A && addi.getName() == servName) {
+						System.out.println(servName + "/" + addi.getName());
+						if (au.getType() == DNS.TYPE_NS && addi.getType() == DNS.TYPE_A && addi.getName().equals(servName)) {
 							diffServ = ((DNSRdataAddress) addi.getData()).getAddress(); 
+							System.out.println("using diffserv " + diffServ.toString());
 							break first; 
 						}
 					}
 				}
-				
+
 				if (diffServ == null) {
 					// Admit defeat
 					DNS response = new DNS(); 
 					
+					System.out.println("got null diffserv");
+
 					// Add the cnames
 					for (DNSResourceRecord cname : cnames) {
 						answers.add(cname); 
@@ -292,8 +308,6 @@ public class SimpleDNS
 					socket.close();
 					
 					return new DatagramPacket(response.serialize(), response.getLength()); 
-					
-					
 				} else {
 					socket.send(new DatagramPacket(receivePacket.getData(), receivePacket.getLength(), diffServ, 53));
 				}

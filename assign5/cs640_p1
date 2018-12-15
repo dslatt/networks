@@ -1,0 +1,72 @@
+Dylan Slattery
+Nathan Kiraly
+
+1. DNS
+
+a.
+
+10 total DNS lookups
+no repeats/redundant lookups
+
+b.
+
+query:
+@a.root-servers.net/ns/www.code.org
+
+records:
+org.			172800	IN	NS	a0.org.afilias-nst.info.
+a0.org.afilias-nst.info. 172800	IN	A	199.19.56.1
+a0.org.afilias-nst.info. 172800	IN	AAAA	2001:500:e::1
+
+query:
+@a0.org.afilias-nst.info/ns/www.code.org
+
+records:
+code.org.		86400	IN	NS	ns-1497.awsdns-59.org.
+ns-1497.awsdns-59.org.	86400	IN	A	205.251.197.217
+
+query:
+@ns-1497.awsdns-59.org/a/www.code.org
+
+records:
+www.code.org.		60	IN	A	34.234.185.106
+
+c.
+
+For second lookup ('code.org') only 1 query is needed.
+
+query:
+@ns-1497.awsdns-59.org/a/code.org
+
+records:
+code.org.		60	IN	A	99.84.171.229
+
+2. CDNs
+
+a. 
+   code.org is on Cloudfront CDN
+
+www.code.org = 52.205.188.91
+matches ip_prefix: 52.200.0.0/13
+	region: us-east-1
+	service: EC2
+
+b. 
+
+cdn.optimizely.com is Akamai
+
+c.
+
+1 to Akamai node
+28 to Cloudfront node
+
+d.
+
+27/28 hits on Cloudfront
+
+
+
+
+
+
+
